@@ -1,0 +1,16 @@
+@import 'tailwindcss';
+@import './tokens.css';
+
+@layer base {
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+  }
+
+  :focus-visible {
+    @apply outline-accent outline-2 outline-offset-2;
+  }
+
+  ::selection {
+    @apply bg-accent text-accent-foreground;
+  }
+}
