@@ -5,7 +5,7 @@ import { cn } from '@/utils/cn';
 
 interface SectionProps {
   id: string;
-  title: string;
+  title: ReactNode;
   eyebrow?: string;
   className?: string;
   children: ReactNode;

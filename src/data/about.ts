@@ -11,5 +11,4 @@ export const aboutContent: AboutContent = {
     'Primeira oportunidade como desenvolvedor front-end, em time onde eu possa aprender com gente mais experiente.',
     'Projeto onde a qualidade da interface importe: performance, responsividade e acessibilidade levadas a sério.',
   ],
-  values: ['Curiosidade', 'Dedicação', 'Resolução de problemas', 'Código limpo', 'Aprendizado contínuo'],
 };

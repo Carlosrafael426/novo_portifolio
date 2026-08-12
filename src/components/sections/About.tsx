@@ -1,32 +1,64 @@
+import type { ReactNode } from 'react';
 import { Section } from '@/components/ui/Section';
+import { BrainGraphic } from '@/components/common/BrainGraphic';
 import { aboutContent } from '@/data/about';
-import { technologies } from '@/data/technologies';
+import { cn } from '@/utils/cn';
 
-const stats = [
-  { value: `${technologies.length}+`, label: 'Tecnologias' },
-  { value: '∞', label: 'Curiosidade' },
-  { value: '01', label: 'Dev Full Stack' },
-];
+const HIGHLIGHTS = ['Full Stack', 'projeto atrás de projeto', 'React, TypeScript e Tailwind', 'Node, Express e PostgreSQL'];
+
+const LOADING_SEGMENTS = 18;
+const LOADING_FILLED = 13;
+
+function highlightBio(text: string): ReactNode[] {
+  const pattern = new RegExp(`(${HIGHLIGHTS.join('|')})`, 'g');
+  return text.split(pattern).map((part, index) =>
+    HIGHLIGHTS.includes(part) ? (
+      <span key={index} className="text-accent">
+        {part}
+      </span>
+    ) : (
+      part
+    ),
+  );
+}
 
 export function About() {
   return (
-    <Section id="sobre" eyebrow="02 / Identidade" title="Quem sou eu">
-      <div className="grid gap-10 lg:grid-cols-[220px_1fr_200px]">
-        <div className="border-border bg-card rounded-lg border p-4 font-mono text-xs">
-          <p className="text-muted mb-3 tracking-wide uppercase">Sistema.info</p>
-          <ul className="space-y-2">
-            {aboutContent.values.map((value) => (
-              <li key={value} className="text-foreground flex gap-2">
-                <span className="text-accent">&gt;</span> {value}
-              </li>
-            ))}
-          </ul>
+    <Section id="sobre" eyebrow="02 / Identidade" title={<span className="sr-only">Quem sou eu</span>}>
+      <div className="grid gap-10 lg:grid-cols-2 lg:items-start">
+        <div>
+          <p
+            aria-hidden="true"
+            className="font-display text-4xl leading-[0.95] font-normal uppercase sm:text-5xl"
+          >
+            Quem sou
+            <br />
+            <span className="text-accent">
+              eu<span className="animate-cursor-blink">_</span>
+            </span>
+          </p>
+
+          <BrainGraphic className="mt-6 h-auto w-full max-w-115" />
+
+          <div className="mt-6 font-mono text-xs">
+            <p className="text-muted tracking-wide uppercase">System.info</p>
+            <p className="text-muted mt-1 tracking-wide uppercase">Identity.loading</p>
+            <div className="mt-3 flex gap-1" aria-hidden="true">
+              {Array.from({ length: LOADING_SEGMENTS }).map((_, i) => (
+                <span key={i} className={cn('h-2.5 w-1.5', i < LOADING_FILLED ? 'bg-accent' : 'bg-border')} />
+              ))}
+            </div>
+          </div>
+
+          <p className="text-muted mt-8 flex items-center gap-2 font-mono text-xs tracking-wide uppercase">
+            <span aria-hidden="true">⊙</span> Scroll to explore
+          </p>
         </div>
 
         <div>
           {aboutContent.bio.map((paragraph, index) => (
             <p key={index} className="text-muted mt-4 leading-relaxed first:mt-0">
-              {paragraph}
+              {highlightBio(paragraph)}
             </p>
           ))}
 
@@ -45,19 +77,6 @@ export function About() {
             ))}
           </ul>
         </div>
-
-        <dl className="flex flex-row gap-8 lg:flex-col lg:gap-6">
-          {stats.map((stat) => (
-            <div key={stat.label}>
-              <dt className="text-accent font-display text-3xl font-normal tracking-[0.08em]">
-                {stat.value}
-              </dt>
-              <dd className="text-muted mt-1 font-mono text-xs tracking-wide uppercase">
-                {stat.label}
-              </dd>
-            </div>
-          ))}
-        </dl>
       </div>
     </Section>
   );

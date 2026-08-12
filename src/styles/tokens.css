@@ -28,9 +28,10 @@
   /* Mesma fonte do "Carlos Rafael" da logo — usada em títulos e destaques, não no corpo de texto. */
   --font-display: 'Bruno Ace', 'Inter', ui-sans-serif, sans-serif;
 
-  /* Microanimações do Hero — só opacidade/posição, nunca scale/box-shadow (ver SystemStatus/ScrollIndicator). */
+  /* Microanimações — só opacidade/posição, nunca scale/box-shadow (ver SystemStatus/ScrollIndicator). */
   --animate-system-pulse: system-pulse 3.5s ease-in-out infinite;
   --animate-scroll-hint: scroll-hint 1.8s ease-in-out infinite;
+  --animate-cursor-blink: cursor-blink 1s step-end infinite;
 }
 
 @keyframes system-pulse {
@@ -49,6 +50,12 @@
   }
   100% {
     transform: translateY(200%);
+  }
+}
+
+@keyframes cursor-blink {
+  50% {
+    opacity: 0;
   }
 }
 
