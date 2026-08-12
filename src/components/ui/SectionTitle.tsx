@@ -15,7 +15,7 @@ export function SectionTitle({ id, eyebrow, as: Heading = 'h2', children }: Sect
       ) : null}
       <Heading
         id={id}
-        className="font-display mt-3 text-3xl font-bold tracking-tight uppercase sm:text-4xl"
+        className="font-display mt-3 text-3xl font-normal tracking-[0.08em] uppercase sm:text-4xl"
       >
         {children}
       </Heading>

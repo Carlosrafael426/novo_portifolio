@@ -9,7 +9,7 @@ export default function NotFoundPage() {
   return (
     <Container className="py-32 text-center">
       <p className="text-accent font-mono text-sm tracking-[0.2em]">404</p>
-      <h1 className="font-display mt-3 text-3xl font-bold tracking-tight uppercase">
+      <h1 className="font-display mt-3 text-3xl font-normal tracking-[0.08em] uppercase">
         Página não encontrada
       </h1>
       <p className="text-muted mt-2">A página que você procura não existe.</p>

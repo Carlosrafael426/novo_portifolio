@@ -26,7 +26,7 @@
   --font-mono:
     'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
   /* Mesma família da logo — usada em títulos e destaques, não no corpo de texto. */
-  --font-display: 'Orbitron', 'Inter', ui-sans-serif, sans-serif;
+  --font-display: 'Jost', 'Inter', ui-sans-serif, sans-serif;
 }
 
 /* Namespace de sistema (não é escala de utility do Tailwind) — z-index compartilhado entre componentes. */

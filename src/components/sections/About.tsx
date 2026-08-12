@@ -49,7 +49,9 @@ export function About() {
         <dl className="flex flex-row gap-8 lg:flex-col lg:gap-6">
           {stats.map((stat) => (
             <div key={stat.label}>
-              <dt className="text-accent font-display text-3xl font-bold">{stat.value}</dt>
+              <dt className="text-accent font-display text-3xl font-normal tracking-[0.08em]">
+                {stat.value}
+              </dt>
               <dd className="text-muted mt-1 font-mono text-xs tracking-wide uppercase">
                 {stat.label}
               </dd>

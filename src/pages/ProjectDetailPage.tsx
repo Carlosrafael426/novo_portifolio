@@ -17,7 +17,9 @@ export default function ProjectDetailPage() {
   if (!project) {
     return (
       <Container className="py-32 text-center">
-        <h1 className="font-display text-2xl font-bold">Projeto não encontrado</h1>
+        <h1 className="font-display text-2xl font-normal tracking-widest uppercase">
+          Projeto não encontrado
+        </h1>
         <p className="text-muted mt-2">O projeto que você procura não existe ou foi removido.</p>
         <Link to="/" className="text-accent mt-6 inline-flex items-center gap-2 font-mono text-sm">
           <ArrowLeft aria-hidden="true" size={14} />
@@ -33,7 +35,7 @@ export default function ProjectDetailPage() {
         <p className="text-accent font-mono text-xs tracking-[0.2em] uppercase">
           {project.category} · {project.year}
         </p>
-        <h1 className="font-display mt-3 text-4xl font-bold tracking-tight uppercase sm:text-5xl">
+        <h1 className="font-display mt-3 text-4xl font-normal tracking-[0.08em] uppercase sm:text-5xl">
           {project.title}
         </h1>
         <p className="text-muted mt-2 text-lg">{project.subtitle}</p>

@@ -21,3 +21,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 *.local
+
+# Prompts de ajuste colados na raiz (instruções pontuais, não fazem parte do projeto)
+PROMPT-*.md

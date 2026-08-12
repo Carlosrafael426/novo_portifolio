@@ -28,7 +28,9 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
           <p className="text-muted font-mono text-xs tracking-wide uppercase">
             {project.category} · {project.year}
           </p>
-          <h3 className="text-foreground mt-2 text-lg font-bold">{project.title}</h3>
+          <h3 className="font-display text-foreground mt-2 text-lg font-normal tracking-widest uppercase">
+            {project.title}
+          </h3>
           <p className="text-muted mt-2 text-sm">{project.description}</p>
           <div className="mt-4 flex flex-wrap gap-2">
             {project.technologies.map((tech) => (

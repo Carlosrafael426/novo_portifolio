@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { MouseEvent } from 'react';
 import { Link, useLocation } from 'react-router';
 import { Download, Grip, X } from 'lucide-react';
+import logoLimpa from '@/assets/logo/logo-limpa.png';
 import { navItems } from '@/data/nav';
 import type { NavItem } from '@/types/nav';
 import { useActiveSection } from '@/hooks/useActiveSection';
@@ -47,25 +48,14 @@ export function Navbar() {
   return (
     <header className="border-border bg-background/80 sticky top-0 z-(--z-navbar) border-b backdrop-blur">
       <Container className="flex h-20 items-center justify-between gap-4 md:grid md:grid-cols-3">
-        <div className="flex items-center gap-3">
-          <Link
-            to={{ pathname: '/', hash: '#inicio' }}
-            onClick={closeMobileMenu}
-            aria-label="Carlos Rafael — início"
-            className="aspect-1200/390 w-14 shrink-0 overflow-hidden sm:w-16"
-          >
-            <img
-              src="/Logo.png"
-              alt=""
-              className="mix-blend-lighten w-full object-cover object-top"
-            />
-          </Link>
-
-          <Button href={CV_PATH} download variant="secondary" size="sm">
-            <Download aria-hidden="true" size={14} />
-            <span className="hidden sm:inline">Baixar CV</span>
-          </Button>
-        </div>
+        <Link
+          to={{ pathname: '/', hash: '#inicio' }}
+          onClick={closeMobileMenu}
+          aria-label="Carlos Rafael — início"
+          className="shrink-0"
+        >
+          <img src={logoLimpa} alt="" className="h-14 w-auto md:h-16" />
+        </Link>
 
         <nav aria-label="Navegação principal" className="hidden md:flex md:justify-center">
           <ul className="flex items-center gap-8">
@@ -80,17 +70,13 @@ export function Navbar() {
                     aria-current={isActive ? 'true' : undefined}
                     className={cn(
                       'group text-muted hover:text-foreground relative inline-block px-1 py-1 font-mono text-xs tracking-[0.15em] uppercase transition-colors',
-                      'hover:shadow-[0_0_16px_-2px_var(--color-accent)]',
                       isActive && 'text-accent',
                     )}
                   >
                     {item.label}
                     <span
                       aria-hidden="true"
-                      className={cn(
-                        'bg-accent absolute bottom-0 left-0 h-px w-full origin-left scale-x-0 transition-transform duration-300 ease-out group-hover:scale-x-100',
-                        isActive && 'scale-x-100',
-                      )}
+                      className="bg-accent absolute bottom-0 left-0 h-px w-full origin-left scale-x-0 transition-transform duration-300 ease-out group-hover:scale-x-100"
                     />
                   </Link>
                 </li>
@@ -99,7 +85,12 @@ export function Navbar() {
           </ul>
         </nav>
 
-        <div className="flex items-center justify-end">
+        <div className="flex items-center justify-end gap-3">
+          <Button href={CV_PATH} download variant="secondary" size="sm">
+            <Download aria-hidden="true" size={14} />
+            <span className="hidden sm:inline">Baixar CV</span>
+          </Button>
+
           <button
             type="button"
             className="border-border text-foreground hover:border-accent hover:text-accent flex h-10 w-10 items-center justify-center rounded-full border transition-colors md:hidden"
