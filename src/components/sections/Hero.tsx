@@ -10,7 +10,18 @@ const PHRASE_TEXT_CLASS = 'block text-[clamp(1.75rem,1rem+3.2vw,3.75rem)] leadin
 
 export function Hero() {
   const { refs } = useHeroIntro();
-  const { root, canvasWrapper, logo, phraseLine1, phraseLine2, tertiary, ctaGroup, status, scrollHint } = refs;
+  const {
+    root,
+    canvasWrapper,
+    introLabel,
+    logo,
+    phraseLine1,
+    phraseLine2,
+    tertiary,
+    ctaGroup,
+    status,
+    scrollHint,
+  } = refs;
 
   return (
     <section
@@ -32,7 +43,10 @@ export function Hero() {
       {/* Nome real pra leitor de tela/SEO — a identidade visual aqui é a logo, não tipografia. */}
       <h1 className="sr-only">Carlos Rafael — Desenvolvedor Full Stack</h1>
 
-      <p className="text-muted relative z-10 hidden font-mono text-[10px] tracking-[0.15em] uppercase sm:block">
+      <p
+        ref={introLabel}
+        className="text-muted relative z-10 hidden font-mono text-[10px] tracking-[0.15em] uppercase sm:block"
+      >
         01 / Intro
       </p>
 

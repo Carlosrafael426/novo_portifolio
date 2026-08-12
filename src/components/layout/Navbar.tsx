@@ -46,7 +46,10 @@ export function Navbar() {
   }
 
   return (
-    <header className="border-border bg-background/80 sticky top-0 z-(--z-navbar) border-b backdrop-blur">
+    <header
+      id="navbar"
+      className="border-border bg-background/80 sticky top-0 z-(--z-navbar) border-b backdrop-blur"
+    >
       <Container className="flex h-20 items-center justify-between gap-4 md:grid md:grid-cols-3">
         <Link
           to={{ pathname: '/', hash: '#inicio' }}
