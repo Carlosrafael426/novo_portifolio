@@ -6,7 +6,7 @@ import { ScrollIndicator } from '@/components/common/ScrollIndicator';
 import { useHeroIntro } from '@/hooks/useHeroIntro';
 import { scrollToSection } from '@/hooks/useHashScroll';
 
-const PHRASE_TEXT_CLASS = 'block text-[clamp(1.75rem,1rem+3.2vw,3.75rem)] leading-[1.05]';
+const PHRASE_TEXT_CLASS = 'block text-[clamp(1.575rem,0.9rem+2.88vw,3.375rem)] leading-[1.05]';
 
 export function Hero() {
   const { refs } = useHeroIntro();
