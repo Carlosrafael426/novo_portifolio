@@ -27,11 +27,35 @@
     'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
   /* Mesma família da logo — usada em títulos e destaques, não no corpo de texto. */
   --font-display: 'Jost', 'Inter', ui-sans-serif, sans-serif;
+
+  /* Microanimações do Hero — só opacidade/posição, nunca scale/box-shadow (ver SystemStatus/ScrollIndicator). */
+  --animate-system-pulse: system-pulse 3.5s ease-in-out infinite;
+  --animate-scroll-hint: scroll-hint 1.8s ease-in-out infinite;
+}
+
+@keyframes system-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes scroll-hint {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(200%);
+  }
 }
 
 /* Namespace de sistema (não é escala de utility do Tailwind) — z-index compartilhado entre componentes. */
 :root {
   --z-navbar: 40;
+  --z-hero-intro-overlay: 45;
   --z-mobile-menu: 50;
   --z-skip-link: 60;
   --z-canvas: -10;

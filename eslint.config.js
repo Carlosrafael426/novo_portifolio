@@ -34,5 +34,18 @@ export default tseslint.config(
       'react-refresh/only-export-components': 'off',
     },
   },
+  {
+    // Cena react-three-fiber: buffers geométricos são construídos uma vez e mutados
+    // imperativamente dentro de useFrame (fora do ciclo de render do React) — é
+    // exatamente pra isso que useFrame existe, e é o mesmo padrão usado internamente
+    // por @react-three/drei. As regras react-hooks/refs, /purity e /immutability são
+    // voltadas ao React Compiler (DOM) e ainda não reconhecem esse padrão do R3F.
+    files: ['src/components/common/HeroCanvas.tsx'],
+    rules: {
+      'react-hooks/refs': 'off',
+      'react-hooks/purity': 'off',
+      'react-hooks/immutability': 'off',
+    },
+  },
   eslintConfigPrettier,
 );
