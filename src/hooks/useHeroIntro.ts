@@ -3,7 +3,7 @@ import type { RefObject } from 'react';
 import { gsap } from 'gsap';
 
 const SESSION_KEY = 'hero_intro_seen';
-const SAFETY_TIMEOUT_MS = 3000;
+const SAFETY_TIMEOUT_MS = 6500;
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -114,15 +114,15 @@ export function useHeroIntro(): UseHeroIntroResult {
         .set(phraseLine2.current, { x: 32 })
         .set(tertiary.current, { x: -24 })
         .set(ctaGroup.current, { x: 24 })
-        .to(canvasWrapper.current, { opacity: 1, duration: 0.5, ease: 'sine.out' }, 0)
+        .to(canvasWrapper.current, { opacity: 1, duration: 1.1, ease: 'sine.out' }, 0)
         // A logo "vem do fundo da tela": nasce pequena/desfocada/transparente e cresce até o
         // tamanho final, como se emergisse da profundidade em direção à câmera.
-        .to(logo.current, { opacity: 1, scale: 1, filter: 'blur(0px)', duration: 0.8 }, 0.15)
-        .to(phraseLine1.current, { opacity: 1, x: 0, duration: 0.4 }, 1.0)
-        .to(phraseLine2.current, { opacity: 1, x: 0, duration: 0.4 }, 1.2)
-        .to(tertiary.current, { opacity: 1, x: 0, duration: 0.35 }, 1.4)
-        .to(ctaGroup.current, { opacity: 1, x: 0, duration: 0.35 }, 1.6)
-        .to([status.current, scrollHint.current], { opacity: 1, duration: 0.25, ease: 'sine.out' }, 1.85);
+        .to(logo.current, { opacity: 1, scale: 1, filter: 'blur(0px)', duration: 1.8 }, 0.3)
+        .to(phraseLine1.current, { opacity: 1, x: 0, duration: 0.9 }, 2.2)
+        .to(phraseLine2.current, { opacity: 1, x: 0, duration: 0.9 }, 2.65)
+        .to(tertiary.current, { opacity: 1, x: 0, duration: 0.8 }, 3.1)
+        .to(ctaGroup.current, { opacity: 1, x: 0, duration: 0.8 }, 3.55)
+        .to([status.current, scrollHint.current], { opacity: 1, duration: 0.6, ease: 'sine.out' }, 4.1);
 
       finishNow = () => tl.progress(1);
       window.addEventListener('scroll', finishNow, { passive: true, once: true });
