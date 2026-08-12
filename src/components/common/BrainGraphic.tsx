@@ -1,8 +1,11 @@
-interface Circle {
-  cx: number;
-  cy: number;
-  r: number;
-}
+import { useEffect, useRef } from 'react';
+import type { RefObject } from 'react';
+import {
+  buildNearestNeighbors,
+  buildNodesInCircles,
+  type Circle,
+  type ConstellationNode,
+} from '@/utils/constellation';
 
 // Lobos do cérebro aproximados por círculos sobrepostos — não é anatomicamente exato, mas dá a
 // silhueta reconhecível (frontal, parietal, temporal, occipital, cerebelo) sem precisar de um
@@ -27,98 +30,201 @@ const NODE_COUNT = 165;
 const NEIGHBORS_PER_NODE = 2;
 const MAX_CONNECT_DISTANCE = 55;
 
-function insideAnyLobe(x: number, y: number): boolean {
-  return LOBES.some((lobe) => Math.hypot(x - lobe.cx, y - lobe.cy) < lobe.r);
-}
+const VIEW_WIDTH = 420;
+const VIEW_HEIGHT = 380;
 
-function buildNodes(): Array<{ x: number; y: number; r: number }> {
-  const minX = Math.min(...LOBES.map((l) => l.cx - l.r));
-  const maxX = Math.max(...LOBES.map((l) => l.cx + l.r));
-  const minY = Math.min(...LOBES.map((l) => l.cy - l.r));
-  const maxY = Math.max(...LOBES.map((l) => l.cy + l.r));
+const MOUSE_RADIUS = 65;
+const MOUSE_STRENGTH = 20;
+const DAMPING = 0.09;
 
-  const nodes: Array<{ x: number; y: number; r: number }> = [];
-  let attempts = 0;
-
-  while (nodes.length < NODE_COUNT && attempts < NODE_COUNT * 40) {
-    attempts += 1;
-    const x = minX + Math.random() * (maxX - minX);
-    const y = minY + Math.random() * (maxY - minY);
-    if (insideAnyLobe(x, y)) {
-      nodes.push({ x, y, r: Math.random() < 0.12 ? 2.6 + Math.random() * 1.4 : 1.1 + Math.random() * 1.1 });
-    }
-  }
-
-  for (const point of BRAINSTEM) {
-    nodes.push({ x: point.x + (Math.random() - 0.5) * 6, y: point.y, r: 1.4 + Math.random() * 0.8 });
-  }
-
-  return nodes;
-}
-
-function buildConnections(
-  nodes: Array<{ x: number; y: number }>,
-): Array<{ x1: number; y1: number; x2: number; y2: number }> {
-  const seen = new Set<string>();
-  const lines: Array<{ x1: number; y1: number; x2: number; y2: number }> = [];
-
-  nodes.forEach((node, i) => {
-    const distances = nodes
-      .map((other, j) => ({ j, d: i === j ? Infinity : Math.hypot(node.x - other.x, node.y - other.y) }))
-      .filter((entry) => entry.d < MAX_CONNECT_DISTANCE)
-      .sort((a, b) => a.d - b.d)
-      .slice(0, NEIGHBORS_PER_NODE);
-
-    for (const { j } of distances) {
-      const key = i < j ? `${i}-${j}` : `${j}-${i}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      lines.push({ x1: node.x, y1: node.y, x2: nodes[j].x, y2: nodes[j].y });
-    }
-  });
-
-  // Cadeia do tronco cerebral — conecta os pontos em sequência, não por proximidade.
+function buildStemConnections(nodes: ConstellationNode[]): Array<[number, number]> {
+  const pairs: Array<[number, number]> = [];
   const stemStart = nodes.length - BRAINSTEM.length;
+
   for (let i = stemStart; i < nodes.length - 1; i++) {
-    lines.push({ x1: nodes[i].x, y1: nodes[i].y, x2: nodes[i + 1].x, y2: nodes[i + 1].y });
-  }
-  const nearestToStem = nodes
-    .slice(0, stemStart)
-    .map((n, idx) => ({ idx, d: Math.hypot(n.x - nodes[stemStart].x, n.y - nodes[stemStart].y) }))
-    .sort((a, b) => a.d - b.d)[0];
-  if (nearestToStem) {
-    const anchor = nodes[nearestToStem.idx];
-    lines.push({ x1: anchor.x, y1: anchor.y, x2: nodes[stemStart].x, y2: nodes[stemStart].y });
+    pairs.push([i, i + 1]);
   }
 
-  return lines;
+  let nearestIdx = 0;
+  let nearestDist = Infinity;
+  for (let i = 0; i < stemStart; i++) {
+    const d = Math.hypot(nodes[i].baseX - nodes[stemStart].baseX, nodes[i].baseY - nodes[stemStart].baseY);
+    if (d < nearestDist) {
+      nearestDist = d;
+      nearestIdx = i;
+    }
+  }
+  pairs.push([nearestIdx, stemStart]);
+
+  return pairs;
 }
 
-// Computado uma única vez no carregamento do módulo — gráfico decorativo estático, sem estado.
-const NODES = buildNodes();
-const CONNECTIONS = buildConnections(NODES);
+function buildBrain(): { nodes: ConstellationNode[]; connections: Array<[number, number]> } {
+  const nodes = buildNodesInCircles(NODE_COUNT, LOBES, BRAINSTEM);
+  const connections = [
+    ...buildNearestNeighbors(nodes, NEIGHBORS_PER_NODE, MAX_CONNECT_DISTANCE),
+    ...buildStemConnections(nodes),
+  ];
+  return { nodes, connections };
+}
+
+function useIsElementVisible(ref: RefObject<Element | null>): RefObject<boolean> {
+  const visible = useRef(true);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    const observer = new IntersectionObserver(([entry]) => {
+      visible.current = entry.isIntersecting;
+    }, { threshold: 0 });
+    observer.observe(element);
+
+    return () => observer.disconnect();
+  }, [ref]);
+
+  return visible;
+}
 
 interface BrainGraphicProps {
   className?: string;
 }
 
+/**
+ * Constelação em formato de cérebro — nós/linhas reagem sutilmente à proximidade do mouse
+ * (atração amortecida, solta suave ao afastar). Nunca toca o cursor nativo — só desloca os
+ * próprios nós (ver memória do usuário: alterar o ponteiro do mouse é a linha vermelha, reagir
+ * ao mouse no conteúdo é permitido quando pedido).
+ */
 export function BrainGraphic({ className }: BrainGraphicProps) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const isVisible = useIsElementVisible(svgRef);
+
+  const dataRef = useRef<{ nodes: ConstellationNode[]; connections: Array<[number, number]> } | null>(null);
+  if (dataRef.current === null) {
+    dataRef.current = buildBrain();
+  }
+  const { nodes, connections } = dataRef.current;
+
+  const circleRefs = useRef<Array<SVGCircleElement | null>>([]);
+  const lineRefs = useRef<Array<SVGLineElement | null>>([]);
+  const pointer = useRef({ x: 0, y: 0, active: false });
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reducedMotion) return;
+
+    function toViewBoxPoint(clientX: number, clientY: number) {
+      const rect = svg!.getBoundingClientRect();
+      return {
+        x: ((clientX - rect.left) / rect.width) * VIEW_WIDTH,
+        y: ((clientY - rect.top) / rect.height) * VIEW_HEIGHT,
+      };
+    }
+
+    function handlePointerMove(event: PointerEvent) {
+      const point = toViewBoxPoint(event.clientX, event.clientY);
+      pointer.current = { ...point, active: true };
+    }
+
+    function handlePointerLeave() {
+      pointer.current.active = false;
+    }
+
+    svg.addEventListener('pointermove', handlePointerMove);
+    svg.addEventListener('pointerleave', handlePointerLeave);
+
+    let frame: number;
+
+    function tick() {
+      if (isVisible.current) {
+        for (const node of nodes) {
+          let targetX = node.baseX;
+          let targetY = node.baseY;
+
+          if (pointer.current.active) {
+            const dx = node.baseX - pointer.current.x;
+            const dy = node.baseY - pointer.current.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < MOUSE_RADIUS && dist > 0.01) {
+              const pull = (1 - dist / MOUSE_RADIUS) * MOUSE_STRENGTH;
+              targetX = node.baseX + (dx / dist) * pull;
+              targetY = node.baseY + (dy / dist) * pull;
+            }
+          }
+
+          node.x += (targetX - node.x) * DAMPING;
+          node.y += (targetY - node.y) * DAMPING;
+        }
+
+        nodes.forEach((node, i) => {
+          const circle = circleRefs.current[i];
+          if (circle) {
+            circle.setAttribute('cx', node.x.toFixed(2));
+            circle.setAttribute('cy', node.y.toFixed(2));
+          }
+        });
+
+        connections.forEach(([a, b], i) => {
+          const line = lineRefs.current[i];
+          if (line) {
+            line.setAttribute('x1', nodes[a].x.toFixed(2));
+            line.setAttribute('y1', nodes[a].y.toFixed(2));
+            line.setAttribute('x2', nodes[b].x.toFixed(2));
+            line.setAttribute('y2', nodes[b].y.toFixed(2));
+          }
+        });
+      }
+
+      frame = requestAnimationFrame(tick);
+    }
+    frame = requestAnimationFrame(tick);
+
+    return () => {
+      svg.removeEventListener('pointermove', handlePointerMove);
+      svg.removeEventListener('pointerleave', handlePointerLeave);
+      cancelAnimationFrame(frame);
+    };
+  }, [nodes, connections, isVisible]);
+
   return (
     <svg
-      viewBox="0 0 420 380"
+      ref={svgRef}
+      viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
       aria-hidden="true"
       className={className}
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
       <g stroke="#c6ff45" strokeWidth="0.6" opacity="0.22">
-        {CONNECTIONS.map((line, i) => (
-          <line key={i} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} />
+        {connections.map(([a, b], i) => (
+          <line
+            key={i}
+            ref={(el) => {
+              lineRefs.current[i] = el;
+            }}
+            x1={nodes[a].x}
+            y1={nodes[a].y}
+            x2={nodes[b].x}
+            y2={nodes[b].y}
+          />
         ))}
       </g>
       <g fill="#c6ff45">
-        {NODES.map((node, i) => (
-          <circle key={i} cx={node.x} cy={node.y} r={node.r} opacity={node.r > 2.4 ? 0.95 : 0.55} />
+        {nodes.map((node, i) => (
+          <circle
+            key={i}
+            ref={(el) => {
+              circleRefs.current[i] = el;
+            }}
+            cx={node.x}
+            cy={node.y}
+            r={node.r}
+            opacity={node.r > 2.4 ? 0.95 : 0.55}
+          />
         ))}
       </g>
     </svg>
