@@ -54,12 +54,7 @@ export function Navbar() {
           aria-label="Carlos Rafael — início"
           className="shrink-0"
         >
-          <img
-            id="navbar-logo"
-            src={logoLimpa}
-            alt=""
-            className="aspect-[1133/654] h-14 w-auto md:h-16"
-          />
+          <img src={logoLimpa} alt="" className="aspect-[1133/654] h-14 w-auto md:h-16" />
         </Link>
 
         <nav aria-label="Navegação principal" className="hidden md:flex md:justify-center">

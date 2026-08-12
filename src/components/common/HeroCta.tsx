@@ -4,25 +4,16 @@ import { cn } from '@/utils/cn';
 interface HeroCtaProps extends AnchorHTMLAttributes<HTMLAnchorElement> {
   children: ReactNode;
   variant?: 'primary' | 'secondary';
-  /** Texto que o HeroCursor mostra ao pairar sobre este CTA (ex: "VER", "ABRIR"). */
-  cursorLabel?: string;
 }
 
 /**
  * CTA bespoke — texto + linha, sem o Button pill do design system.
  * A linha cresce a partir da origem no hover/:focus-visible; o texto desloca poucos pixels.
  */
-export function HeroCta({
-  children,
-  variant = 'primary',
-  cursorLabel,
-  className,
-  ...props
-}: HeroCtaProps) {
+export function HeroCta({ children, variant = 'primary', className, ...props }: HeroCtaProps) {
   return (
     <a
       {...props}
-      data-cursor={cursorLabel}
       className={cn(
         'group relative inline-flex items-center gap-2 font-mono text-xs tracking-[0.15em] uppercase',
         'outline-none transition-transform duration-300 hover:translate-x-1 focus-visible:translate-x-1',

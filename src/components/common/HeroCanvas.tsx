@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
 const ACCENT_COLOR = new THREE.Color('#c6ff45');
+const WHITE_COLOR = new THREE.Color('#f5f5f2');
 const CONNECT_DISTANCE = 2.4;
 const NEIGHBORS_PER_NODE = 6;
-const MOUSE_RADIUS = 2.2;
-const DAMPING = 0.06;
 
 const FADE_IN_S = 0.6;
 const FADE_OUT_S = 0.8;
@@ -14,12 +13,20 @@ const HOLD_S = 2.2;
 const HOLD_JITTER_S = 2.5;
 const IDLE_JITTER_S = 1.2;
 
+const SEGMENTS_PER_LINE = 10;
+const VERTS_PER_LINE = SEGMENTS_PER_LINE * 2;
+const PULSE_WIDTH = 0.16;
+const BASE_ALPHA = 0.08;
+const PEAK_ALPHA = 0.85;
+const PULSE_SPEED_MIN = 0.12;
+const PULSE_SPEED_MAX = 0.3;
+
 type Layer = 0 | 1 | 2;
 
-const LAYER_CONFIG: Record<Layer, { zMin: number; zMax: number; size: number; amp: number; mouse: number }> = {
-  0: { zMin: 1.2, zMax: 3, size: 0.11, amp: 0.35, mouse: 1 },
-  1: { zMin: -1, zMax: 1.2, size: 0.07, amp: 0.22, mouse: 0.55 },
-  2: { zMin: -3.6, zMax: -1, size: 0.045, amp: 0.14, mouse: 0.25 },
+const LAYER_CONFIG: Record<Layer, { zMin: number; zMax: number; amp: number }> = {
+  0: { zMin: 1.2, zMax: 3, amp: 0.35 },
+  1: { zMin: -1, zMax: 1.2, amp: 0.22 },
+  2: { zMin: -3.6, zMax: -1, amp: 0.14 },
 };
 
 interface Tier {
@@ -33,12 +40,12 @@ function getPerfTier(width: number): Tier {
   const cores = navigator.hardwareConcurrency ?? 4;
 
   if (coarse || width < 768) {
-    return { nodeCount: 45, slotCount: 22, dpr: 1 };
+    return { nodeCount: 50, slotCount: 40, dpr: 1 };
   }
   if (cores >= 8 && width >= 1280) {
-    return { nodeCount: 150, slotCount: 75, dpr: [1, 1.75] };
+    return { nodeCount: 170, slotCount: 131, dpr: [1, 1.75] };
   }
-  return { nodeCount: 90, slotCount: 45, dpr: [1, 1.5] };
+  return { nodeCount: 100, slotCount: 81, dpr: [1, 1.5] };
 }
 
 interface NodeData {
@@ -48,7 +55,6 @@ interface NodeData {
   amp: number;
   layer: Layer;
   neighbors: number[];
-  displacement: THREE.Vector3;
 }
 
 type SlotState = 'idle' | 'fadeIn' | 'hold' | 'fadeOut';
@@ -59,43 +65,39 @@ interface LineSlot {
   nodeB: number;
   timer: number;
   alpha: number;
+  pulsePos: number;
+  pulseSpeed: number;
+  /** 0 = lima puro, 1 = branco puro — cada linha recebe um tom próprio nesse intervalo. */
+  colorMix: number;
 }
 
 interface FieldData {
   nodes: NodeData[];
   slots: LineSlot[];
-  positions: Float32Array;
-  sizes: Float32Array;
+  nodeWorldPos: Float32Array;
   linePositions: Float32Array;
   lineColors: Float32Array;
+}
+
+function randomPulseSpeed(): number {
+  return PULSE_SPEED_MIN + Math.random() * (PULSE_SPEED_MAX - PULSE_SPEED_MIN);
 }
 
 function buildField(nodeCount: number, slotCount: number): FieldData {
   const nodes = buildNodes(nodeCount);
   const slots = buildSlots(slotCount, nodes);
 
-  const positions = new Float32Array(nodeCount * 3);
-  const sizes = new Float32Array(nodeCount);
+  const nodeWorldPos = new Float32Array(nodeCount * 3);
   nodes.forEach((node, i) => {
-    positions[i * 3] = node.basePos.x;
-    positions[i * 3 + 1] = node.basePos.y;
-    positions[i * 3 + 2] = node.basePos.z;
-    sizes[i] = LAYER_CONFIG[node.layer].size * (0.7 + Math.random() * 0.6);
+    nodeWorldPos[i * 3] = node.basePos.x;
+    nodeWorldPos[i * 3 + 1] = node.basePos.y;
+    nodeWorldPos[i * 3 + 2] = node.basePos.z;
   });
 
-  const linePositions = new Float32Array(slotCount * 6);
-  const lineColors = new Float32Array(slotCount * 8);
-  slots.forEach((slot, i) => {
-    for (let vertex = 0; vertex < 2; vertex++) {
-      const offset = i * 8 + vertex * 4;
-      lineColors[offset] = ACCENT_COLOR.r;
-      lineColors[offset + 1] = ACCENT_COLOR.g;
-      lineColors[offset + 2] = ACCENT_COLOR.b;
-      lineColors[offset + 3] = slot.alpha;
-    }
-  });
+  const linePositions = new Float32Array(slotCount * VERTS_PER_LINE * 3);
+  const lineColors = new Float32Array(slotCount * VERTS_PER_LINE * 4);
 
-  return { nodes, slots, positions, sizes, linePositions, lineColors };
+  return { nodes, slots, nodeWorldPos, linePositions, lineColors };
 }
 
 function buildNodes(count: number): NodeData[] {
@@ -116,7 +118,6 @@ function buildNodes(count: number): NodeData[] {
       amp: config.amp * (0.6 + Math.random() * 0.8),
       layer,
       neighbors: [],
-      displacement: new THREE.Vector3(),
     });
   }
 
@@ -158,21 +159,29 @@ function buildSlots(count: number, nodes: NodeData[]): LineSlot[] {
       timer: HOLD_S + Math.random() * HOLD_JITTER_S,
       // Seed já "conectado" (alpha 1) — evita o campo começar vazio e ir enchendo aos poucos.
       alpha: pair ? 1 : 0,
+      pulsePos: Math.random(),
+      pulseSpeed: randomPulseSpeed(),
+      colorMix: Math.random(),
     });
   }
 
   return slots;
 }
 
-interface ParticleFieldProps {
+/** Distância ao longo do laço 0..1, já considerando o wraparound do pulso. */
+function loopDistance(a: number, b: number): number {
+  const d = Math.abs(a - b);
+  return Math.min(d, 1 - d);
+}
+
+interface ConnectionFieldProps {
   nodeCount: number;
   slotCount: number;
   reducedMotion: boolean;
 }
 
-function ParticleField({ nodeCount, slotCount, reducedMotion }: ParticleFieldProps) {
+function ConnectionField({ nodeCount, slotCount, reducedMotion }: ConnectionFieldProps) {
   const groupRef = useRef<THREE.Group>(null);
-  const pointsGeometryRef = useRef<THREE.BufferGeometry>(null);
   const linesGeometryRef = useRef<THREE.BufferGeometry>(null);
 
   // Dados mutáveis da simulação (mutados por dentro do useFrame, nunca via setState) —
@@ -181,25 +190,11 @@ function ParticleField({ nodeCount, slotCount, reducedMotion }: ParticleFieldPro
   if (fieldRef.current === null) {
     fieldRef.current = buildField(nodeCount, slotCount);
   }
-  const { nodes, slots, positions, sizes, linePositions, lineColors } = fieldRef.current;
-
-  const pointUniforms = useMemo(
-    () => ({
-      uColor: { value: ACCENT_COLOR },
-      uOpacity: { value: 0.85 },
-    }),
-    [],
-  );
-
-  const mouseWorld = useRef(new THREE.Vector3(0, 0, LAYER_CONFIG[0].zMin));
-  const scratchTarget = useRef(new THREE.Vector3());
-  const scratchToMouse = useRef(new THREE.Vector3());
-  const scratchFinal = useRef(new THREE.Vector3());
+  const { nodes, slots, nodeWorldPos, linePositions, lineColors } = fieldRef.current;
 
   useEffect(() => {
-    const geometry = pointsGeometryRef.current;
     const lines = linesGeometryRef.current;
-    const attrs = [geometry?.attributes.position, lines?.attributes.position, lines?.attributes.color];
+    const attrs = [lines?.attributes.position, lines?.attributes.color];
 
     for (const attr of attrs) {
       if (attr instanceof THREE.BufferAttribute) {
@@ -210,32 +205,22 @@ function ParticleField({ nodeCount, slotCount, reducedMotion }: ParticleFieldPro
 
   useFrame((state, delta) => {
     const group = groupRef.current;
-    const pointsGeometry = pointsGeometryRef.current;
     const linesGeometry = linesGeometryRef.current;
-    if (!group || !pointsGeometry || !linesGeometry) return;
+    if (!group || !linesGeometry) return;
 
     if (!reducedMotion) {
       group.rotation.y += 0.0004;
     }
 
-    // Cursor mapeado pro plano da camada near (aproximação — não precisa de raycasting real).
-    const camera = state.camera as THREE.PerspectiveCamera;
-    const targetZ = LAYER_CONFIG[0].zMin;
-    const distance = camera.position.z - targetZ;
-    const vFov = (camera.fov * Math.PI) / 180;
-    const halfHeight = Math.tan(vFov / 2) * distance;
-    const halfWidth = halfHeight * (state.size.width / state.size.height);
-    scratchTarget.current.set(state.pointer.x * halfWidth, state.pointer.y * halfHeight, targetZ);
-    mouseWorld.current.lerp(scratchTarget.current, reducedMotion ? 1 : 0.08);
-
-    const positionAttr = pointsGeometry.attributes.position as THREE.BufferAttribute;
     const elapsed = state.clock.elapsedTime;
 
     for (let i = 0; i < nodes.length; i++) {
       const node = nodes[i];
 
       if (reducedMotion) {
-        positionAttr.setXYZ(i, node.basePos.x, node.basePos.y, node.basePos.z);
+        nodeWorldPos[i * 3] = node.basePos.x;
+        nodeWorldPos[i * 3 + 1] = node.basePos.y;
+        nodeWorldPos[i * 3 + 2] = node.basePos.z;
         continue;
       }
 
@@ -243,25 +228,10 @@ function ParticleField({ nodeCount, slotCount, reducedMotion }: ParticleFieldPro
       const oscY = Math.cos(elapsed * node.freq[1] + node.phase[1]) * node.amp;
       const oscZ = Math.sin(elapsed * node.freq[2] + node.phase[2]) * node.amp * 0.5;
 
-      scratchToMouse.current.subVectors(mouseWorld.current, node.basePos);
-      const dist = scratchToMouse.current.length();
-      const strength = LAYER_CONFIG[node.layer].mouse;
-
-      if (dist < MOUSE_RADIUS && dist > 0.0001) {
-        const pull = (1 - dist / MOUSE_RADIUS) * strength * 0.6;
-        scratchToMouse.current.normalize().multiplyScalar(pull);
-        node.displacement.lerp(scratchToMouse.current, DAMPING);
-      } else {
-        node.displacement.lerp(scratchTarget.current.set(0, 0, 0), DAMPING);
-      }
-
-      scratchFinal.current
-        .set(node.basePos.x + oscX, node.basePos.y + oscY, node.basePos.z + oscZ)
-        .add(node.displacement);
-
-      positionAttr.setXYZ(i, scratchFinal.current.x, scratchFinal.current.y, scratchFinal.current.z);
+      nodeWorldPos[i * 3] = node.basePos.x + oscX;
+      nodeWorldPos[i * 3 + 1] = node.basePos.y + oscY;
+      nodeWorldPos[i * 3 + 2] = node.basePos.z + oscZ;
     }
-    positionAttr.needsUpdate = true;
 
     const linePosAttr = linesGeometry.attributes.position as THREE.BufferAttribute;
     const lineColorAttr = linesGeometry.attributes.color as THREE.BufferAttribute;
@@ -281,6 +251,9 @@ function ParticleField({ nodeCount, slotCount, reducedMotion }: ParticleFieldPro
                 slot.nodeB = pair[1];
                 slot.state = 'fadeIn';
                 slot.timer = FADE_IN_S;
+                slot.pulsePos = Math.random();
+                slot.pulseSpeed = randomPulseSpeed();
+                slot.colorMix = Math.random();
               } else {
                 slot.timer = IDLE_JITTER_S;
               }
@@ -313,20 +286,51 @@ function ParticleField({ nodeCount, slotCount, reducedMotion }: ParticleFieldPro
             break;
           }
         }
+
+        slot.pulsePos = (slot.pulsePos + slot.pulseSpeed * delta) % 1;
       }
 
-      const a = positionAttr.count > slot.nodeA ? slot.nodeA : 0;
-      const b = positionAttr.count > slot.nodeB ? slot.nodeB : 0;
+      const a = nodes.length > slot.nodeA ? slot.nodeA : 0;
+      const b = nodes.length > slot.nodeB ? slot.nodeB : 0;
 
-      linePosAttr.setXYZ(i * 2, positionAttr.getX(a), positionAttr.getY(a), positionAttr.getZ(a));
-      linePosAttr.setXYZ(
-        i * 2 + 1,
-        positionAttr.getX(b),
-        positionAttr.getY(b),
-        positionAttr.getZ(b),
-      );
-      lineColorAttr.setXYZW(i * 2, ACCENT_COLOR.r, ACCENT_COLOR.g, ACCENT_COLOR.b, slot.alpha);
-      lineColorAttr.setXYZW(i * 2 + 1, ACCENT_COLOR.r, ACCENT_COLOR.g, ACCENT_COLOR.b, slot.alpha);
+      const ax = nodeWorldPos[a * 3];
+      const ay = nodeWorldPos[a * 3 + 1];
+      const az = nodeWorldPos[a * 3 + 2];
+      const bx = nodeWorldPos[b * 3];
+      const by = nodeWorldPos[b * 3 + 1];
+      const bz = nodeWorldPos[b * 3 + 2];
+
+      const lineBase = i * VERTS_PER_LINE;
+
+      // Tom de base da linha (fixo por slot) — varia entre lima puro e branco.
+      const baseR = ACCENT_COLOR.r + (WHITE_COLOR.r - ACCENT_COLOR.r) * slot.colorMix;
+      const baseG = ACCENT_COLOR.g + (WHITE_COLOR.g - ACCENT_COLOR.g) * slot.colorMix;
+      const baseB = ACCENT_COLOR.b + (WHITE_COLOR.b - ACCENT_COLOR.b) * slot.colorMix;
+
+      for (let seg = 0; seg < SEGMENTS_PER_LINE; seg++) {
+        const t0 = seg / SEGMENTS_PER_LINE;
+        const t1 = (seg + 1) / SEGMENTS_PER_LINE;
+
+        const vertIndex = lineBase + seg * 2;
+        linePosAttr.setXYZ(vertIndex, ax + (bx - ax) * t0, ay + (by - ay) * t0, az + (bz - az) * t0);
+        linePosAttr.setXYZ(vertIndex + 1, ax + (bx - ax) * t1, ay + (by - ay) * t1, az + (bz - az) * t1);
+
+        for (let v = 0; v < 2; v++) {
+          const t = v === 0 ? t0 : t1;
+          const pulse = reducedMotion
+            ? 0
+            : Math.max(0, 1 - loopDistance(t, slot.pulsePos) / PULSE_WIDTH);
+          const glow = pulse * pulse;
+
+          // O pulso clareia a linha em direção ao branco, por cima do tom de base.
+          const r = baseR + (WHITE_COLOR.r - baseR) * glow;
+          const g = baseG + (WHITE_COLOR.g - baseG) * glow;
+          const bCol = baseB + (WHITE_COLOR.b - baseB) * glow;
+          const alpha = (BASE_ALPHA + (PEAK_ALPHA - BASE_ALPHA) * glow) * slot.alpha;
+
+          lineColorAttr.setXYZW(vertIndex + v, r, g, bCol, alpha);
+        }
+      }
     }
 
     linePosAttr.needsUpdate = true;
@@ -335,53 +339,16 @@ function ParticleField({ nodeCount, slotCount, reducedMotion }: ParticleFieldPro
 
   return (
     <group ref={groupRef}>
-      <points>
-        <bufferGeometry ref={pointsGeometryRef}>
-          <bufferAttribute attach="attributes-position" args={[positions, 3]} />
-          <bufferAttribute attach="attributes-aSize" args={[sizes, 1]} />
-        </bufferGeometry>
-        <shaderMaterial
-          transparent
-          depthWrite={false}
-          uniforms={pointUniforms}
-          vertexShader={POINT_VERTEX_SHADER}
-          fragmentShader={POINT_FRAGMENT_SHADER}
-        />
-      </points>
       <lineSegments>
         <bufferGeometry ref={linesGeometryRef}>
           <bufferAttribute attach="attributes-position" args={[linePositions, 3]} />
           <bufferAttribute attach="attributes-color" args={[lineColors, 4]} />
         </bufferGeometry>
-        <lineBasicMaterial vertexColors transparent opacity={0.1} depthWrite={false} />
+        <lineBasicMaterial vertexColors transparent depthWrite={false} />
       </lineSegments>
     </group>
   );
 }
-
-const POINT_VERTEX_SHADER = /* glsl */ `
-  attribute float aSize;
-
-  void main() {
-    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-    gl_Position = projectionMatrix * mvPosition;
-    gl_PointSize = aSize * (360.0 / -mvPosition.z);
-  }
-`;
-
-const POINT_FRAGMENT_SHADER = /* glsl */ `
-  uniform vec3 uColor;
-  uniform float uOpacity;
-
-  void main() {
-    vec2 cxy = 2.0 * gl_PointCoord - 1.0;
-    float r = dot(cxy, cxy);
-    float delta = fwidth(r);
-    float mask = 1.0 - smoothstep(1.0 - delta, 1.0 + delta, r);
-    if (mask <= 0.0) discard;
-    gl_FragColor = vec4(uColor, uOpacity * mask);
-  }
-`;
 
 function useIsHeroVisible(containerRef: React.RefObject<HTMLDivElement | null>): boolean {
   const [isIntersecting, setIsIntersecting] = useState(true);
@@ -411,9 +378,10 @@ function useIsHeroVisible(containerRef: React.RefObject<HTMLDivElement | null>):
 }
 
 /**
- * Fundo do Hero: sistema neural vivo (Three.js/R3F) — nós em várias escalas e profundidades,
- * conexões que nascem e morrem, movimento orgânico e resposta amortecida ao mouse.
- * Carregado via React.lazy a partir de HeroCanvasSlot — isolado do bundle principal.
+ * Fundo do Hero: rede de conexões (Three.js/R3F) — sem nós visíveis, só linhas que nascem e
+ * morrem, com um pulso neon viajando por cada uma. Carregado via React.lazy a partir de
+ * HeroCanvasSlot — isolado do bundle principal. Sem qualquer resposta ao mouse (ver memória
+ * do usuário: efeitos reativos ao cursor não devem voltar a este site).
  */
 export default function HeroCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -434,7 +402,7 @@ export default function HeroCanvas() {
         gl={{ antialias: true, alpha: true }}
         frameloop={frameloop}
       >
-        <ParticleField
+        <ConnectionField
           nodeCount={tier.nodeCount}
           slotCount={tier.slotCount}
           reducedMotion={reducedMotion}

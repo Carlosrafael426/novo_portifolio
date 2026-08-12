@@ -55,7 +55,6 @@
 /* Namespace de sistema (não é escala de utility do Tailwind) — z-index compartilhado entre componentes. */
 :root {
   --z-navbar: 40;
-  --z-hero-intro-overlay: 45;
   --z-mobile-menu: 50;
   --z-skip-link: 60;
   --z-canvas: -10;
