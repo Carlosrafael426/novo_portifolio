@@ -25,8 +25,8 @@
     'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono:
     'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
-  /* Mesma família da logo — usada em títulos e destaques, não no corpo de texto. */
-  --font-display: 'Jost', 'Inter', ui-sans-serif, sans-serif;
+  /* Mesma fonte do "Carlos Rafael" da logo — usada em títulos e destaques, não no corpo de texto. */
+  --font-display: 'Bruno Ace', 'Inter', ui-sans-serif, sans-serif;
 
   /* Microanimações do Hero — só opacidade/posição, nunca scale/box-shadow (ver SystemStatus/ScrollIndicator). */
   --animate-system-pulse: system-pulse 3.5s ease-in-out infinite;
