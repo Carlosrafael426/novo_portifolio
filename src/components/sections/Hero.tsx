@@ -17,7 +17,7 @@ export function Hero() {
       id="inicio"
       aria-label="Início"
       ref={root}
-      className="relative flex min-h-screen scroll-mt-24 flex-col overflow-hidden px-6 py-28 sm:px-10 lg:px-16"
+      className="relative flex min-h-screen scroll-mt-24 flex-col overflow-hidden px-6 pt-16 pb-28 sm:px-10 sm:pt-20 lg:px-16"
     >
       <div ref={canvasWrapper} className="absolute inset-0">
         <HeroCanvasSlot />

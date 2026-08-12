@@ -10,6 +10,10 @@ function prefersReducedMotion(): boolean {
 }
 
 function alreadySeenThisSession(): boolean {
+  // Em dev a intro sempre roda de novo a cada reload — senão, ao iterar no navegador,
+  // a sessionStorage do primeiro load "gruda" e some pro resto da sessão de trabalho.
+  if (import.meta.env.DEV) return false;
+
   try {
     return sessionStorage.getItem(SESSION_KEY) === '1';
   } catch {
