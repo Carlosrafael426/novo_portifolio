@@ -70,6 +70,7 @@ export function Navbar() {
                     aria-current={isActive ? 'true' : undefined}
                     className={cn(
                       'group text-muted hover:text-foreground relative inline-block px-1 py-1 font-mono text-xs tracking-[0.15em] uppercase transition-colors',
+                      'hover:[text-shadow:0_0_10px_var(--color-accent)]',
                       isActive && 'text-accent',
                     )}
                   >
