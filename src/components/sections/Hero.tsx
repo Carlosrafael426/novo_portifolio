@@ -3,6 +3,7 @@ import { HeroCanvasSlot } from '@/components/common/HeroCanvasSlot';
 import { SectionIndexRail } from '@/components/common/SectionIndexRail';
 import { Container } from '@/components/ui/Container';
 import { Button } from '@/components/ui/Button';
+import { VisuallyHidden } from '@/components/ui/VisuallyHidden';
 import { scrollToSection } from '@/hooks/useHashScroll';
 
 export function Hero() {
@@ -17,28 +18,21 @@ export function Hero() {
       <SectionIndexRail />
 
       <Container className="relative flex flex-col items-center text-center">
-        {/* Ícone da marca — recorte apenas do símbolo, sem o nome/cargo embutidos no PNG,
-            mesclado (mix-blend-screen) pra mesclar com o fundo de partículas atrás dele. */}
-        <div aria-hidden="true" className="aspect-1200/390 w-55 overflow-hidden sm:w-75 md:w-90">
-          <img
-            src="/Logo.png"
-            alt=""
-            className="mix-blend-lighten w-full object-cover object-top"
-          />
-        </div>
+        {/* H1 real (SEO/acessibilidade) — visualmente a logo já carrega nome e cargo. */}
+        <VisuallyHidden>
+          <h1>Carlos Rafael — Desenvolvedor Full Stack</h1>
+        </VisuallyHidden>
 
-        <p className="text-accent -mt-2 flex items-center gap-2 font-mono text-xs tracking-[0.2em] uppercase sm:-mt-4">
-          <span className="bg-accent h-1.5 w-1.5 rounded-full" aria-hidden="true" />
-          Desenvolvedor Full Stack
-        </p>
+        {/* Logo completa (ícone + nome + cargo) — fundo removido via mix-blend-lighten
+            pra mesclar com o fundo de partículas atrás dela. */}
+        <img
+          src="/Logo.png"
+          alt=""
+          aria-hidden="true"
+          className="mix-blend-lighten w-80 sm:w-104 md:w-lg"
+        />
 
-        <h1 className="font-display mt-6 text-5xl leading-[0.95] font-bold tracking-tight uppercase sm:text-7xl">
-          Carlos
-          <br />
-          Rafael
-        </h1>
-
-        <p className="text-muted mt-6 max-w-md text-base sm:text-lg">
+        <p className="text-muted -mt-4 max-w-md text-base sm:text-lg">
           Eu construo sistemas digitais, interfaces e experiências que resolvem problemas reais.
         </p>
 
