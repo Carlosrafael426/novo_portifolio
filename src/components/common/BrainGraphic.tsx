@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { gsap } from 'gsap';
 import { connectComponents, type ConstellationNode } from '@/utils/constellation';
 import { aboutContent } from '@/data/about';
@@ -152,18 +153,67 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+// Realce de sintaxe minimalista, só com os tons que o site já usa (accent/foreground/muted) —
+// sem paleta nova. As chaves do objeto espelham a interface AboutContent de verdade
+// (src/types/about.ts), não são inventadas.
+const KEYWORD = 'text-accent';
+const TYPE_NAME = 'text-foreground/50';
+const PROPERTY = 'text-foreground/70';
+const STRING = 'text-foreground';
+const PUNCT = 'text-muted';
+const COMMENT = 'text-muted italic';
+
+function kw(text: string) {
+  return <span className={KEYWORD}>{text}</span>;
+}
+function type(text: string) {
+  return <span className={TYPE_NAME}>{text}</span>;
+}
+function prop(text: string) {
+  return <span className={PROPERTY}>{text}</span>;
+}
+function str(text: string) {
+  return (
+    <span className={STRING}>
+      <span className={PUNCT}>"</span>
+      {text}
+      <span className={PUNCT}>"</span>
+    </span>
+  );
+}
+function punct(text: string) {
+  return <span className={PUNCT}>{text}</span>;
+}
+
 interface CodeLine {
-  text: string;
-  className: string;
+  content: ReactNode;
+}
+
+function stringArrayLines(items: string[]): CodeLine[] {
+  return items.map((item) => ({ content: <>{'    '}{str(item)}{punct(',')}</> }));
 }
 
 const CODE_LINES: CodeLine[] = [
-  { text: '// sobre-mim.ts', className: 'text-accent' },
-  ...aboutContent.bio.map((paragraph) => ({ text: `// ${paragraph}`, className: 'text-foreground/90 mt-2' })),
-  { text: '/**', className: 'text-accent mt-3' },
-  { text: ` * ${aboutContent.philosophy}`, className: 'text-foreground/90 italic' },
-  { text: ' */', className: 'text-accent' },
-  ...aboutContent.lookingFor.map((item) => ({ text: `// - ${item}`, className: 'text-muted mt-1' })),
+  { content: <span className={COMMENT}>{'// sobre-mim.ts'}</span> },
+  { content: <>{' '}</> },
+  { content: <>{kw('interface')}{' '}{type('AboutContent')}{' '}{punct('{')}</> },
+  { content: <>{'  '}{prop('bio')}{punct(': ')}{type('string[]')}{punct(';')}</> },
+  { content: <>{'  '}{prop('philosophy')}{punct(': ')}{type('string')}{punct(';')}</> },
+  { content: <>{'  '}{prop('lookingFor')}{punct(': ')}{type('string[]')}{punct(';')}</> },
+  { content: <>{punct('}')}</> },
+  { content: <>{' '}</> },
+  { content: <>{kw('const')}{' carlos: '}{type('AboutContent')}{' '}{punct('= {')}</> },
+  { content: <>{'  '}{prop('bio')}{punct(': [')}</> },
+  ...stringArrayLines(aboutContent.bio),
+  { content: <>{'  '}{punct('],')}</> },
+  { content: <>{'  '}{prop('philosophy')}{punct(':')}</> },
+  { content: <>{'    '}{str(aboutContent.philosophy)}{punct(',')}</> },
+  { content: <>{'  '}{prop('lookingFor')}{punct(': [')}</> },
+  ...stringArrayLines(aboutContent.lookingFor),
+  { content: <>{'  '}{punct('],')}</> },
+  { content: <>{punct('};')}</> },
+  { content: <>{' '}</> },
+  { content: <>{kw('export')}{' '}{kw('default')}{' carlos;'}</> },
 ];
 
 interface BrainGraphicProps {
@@ -444,15 +494,24 @@ export function BrainGraphic({ className }: BrainGraphicProps) {
         </g>
       </svg>
 
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-3 sm:p-6">
-        <div className="max-w-md text-left font-mono text-[10px] leading-relaxed sm:text-xs">
+      {/* fixed (não absolute dentro do próprio gráfico) pra aparecer "no meio da tela" de
+          verdade — com o conteúdo todo, a caixa do cérebro é pequena demais e o texto
+          transbordava por cima do título em telas estreitas. */}
+      <div
+        className={`pointer-events-none fixed inset-0 z-(--z-mobile-menu) flex items-center justify-center p-4 transition-opacity duration-500 sm:p-8 ${dissolved ? 'opacity-100' : 'opacity-0'}`}
+      >
+        <div
+          aria-hidden="true"
+          className="bg-background/85 pointer-events-none absolute inset-0"
+        />
+        <div className="relative max-h-[80vh] max-w-lg overflow-y-auto text-left font-mono text-[10px] whitespace-pre-wrap leading-relaxed sm:text-xs">
           {CODE_LINES.map((line, index) => (
             <p
               key={index}
-              className={`${line.className} transition-opacity duration-400 ease-out ${dissolved ? 'opacity-100' : 'opacity-0'}`}
-              style={{ transitionDelay: dissolved ? `${index * 70}ms` : '0ms' }}
+              className={`transition-opacity duration-400 ease-out ${dissolved ? 'opacity-100' : 'opacity-0'}`}
+              style={{ transitionDelay: dissolved ? `${index * 45}ms` : '0ms' }}
             >
-              {line.text}
+              {line.content}
             </p>
           ))}
         </div>
