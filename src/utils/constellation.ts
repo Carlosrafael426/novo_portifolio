@@ -94,3 +94,57 @@ export function buildNearestNeighbors(
 
   return pairs;
 }
+
+/**
+ * Une componentes desconectados (ilhas) ao maior grafo, ligando sempre o par de nós mais
+ * próximo entre dois grupos — sem isso, pontos espalhados aleatoriamente quase sempre deixam
+ * pedaços soltos que quebram a leitura de "uma forma só".
+ */
+export function connectComponents(
+  nodes: Array<{ baseX: number; baseY: number }>,
+  pairs: Array<[number, number]>,
+): Array<[number, number]> {
+  const parent = nodes.map((_, i) => i);
+  function find(i: number): number {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  }
+  function union(a: number, b: number) {
+    parent[find(a)] = find(b);
+  }
+  for (const [a, b] of pairs) union(a, b);
+
+  const result = [...pairs];
+
+  for (;;) {
+    const groups = new Map<number, number[]>();
+    nodes.forEach((_, i) => {
+      const root = find(i);
+      const group = groups.get(root);
+      if (group) group.push(i);
+      else groups.set(root, [i]);
+    });
+    if (groups.size <= 1) break;
+
+    const components = [...groups.values()];
+    let best: { i: number; j: number; d: number } | null = null;
+    for (let a = 0; a < components.length; a++) {
+      for (let b = a + 1; b < components.length; b++) {
+        for (const i of components[a]) {
+          for (const j of components[b]) {
+            const d = Math.hypot(nodes[i].baseX - nodes[j].baseX, nodes[i].baseY - nodes[j].baseY);
+            if (!best || d < best.d) best = { i, j, d };
+          }
+        }
+      }
+    }
+    if (!best) break;
+    result.push([best.i, best.j]);
+    union(best.i, best.j);
+  }
+
+  return result;
+}
