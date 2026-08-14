@@ -3,98 +3,53 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { gsap } from 'gsap';
 import { aboutContent } from '@/data/about';
+import faceMeshJson from '@/assets/face/face-mesh.json';
 
 const ACCENT_HEX = '#c6ff45';
 const WHITE_HEX = '#f5f5f2';
 const ACCENT_COLOR = new THREE.Color(ACCENT_HEX);
 const WHITE_COLOR = new THREE.Color(WHITE_HEX);
 
-// Perfil da cabeça (raio máximo em função da altura Y), do topo do crânio até a base do pescoço —
-// os mesmos números validados na silhueta 2D anterior, só reescalados pra unidades de mundo 3D.
-// A cabeça é gerada girando esse perfil em torno do eixo Y (um "torno"), o que garante uma forma
-// arredondada e sem auto-interseção por construção — não depende de acertar um polígono à mão.
-// Recentralizado em Y (o corte do pescoço deslocou o meio geométrico da cabeça pra cima — sem
-// isso, a cabeça gira fora do próprio centro e fica baixa no enquadramento da câmera).
-const PROFILE: Array<{ y: number; r: number }> = [
-  { y: 0.98, r: 0 }, // topo do crânio
-  { y: 0.86, r: 0.44 },
-  { y: 0.58, r: 0.8 }, // têmpora, ponto mais largo do crânio
-  { y: 0.24, r: 0.83 },
-  { y: -0.08, r: 0.76 },
-  { y: -0.38, r: 0.68 }, // zigomático — mais largo do rosto
-  { y: -0.64, r: 0.54 }, // ângulo da mandíbula
-  { y: -0.88, r: 0.34 }, // queixo, mais definido
-  { y: -0.98, r: 0 }, // fecha logo abaixo do queixo — sem pescoço
-];
-
-const DEPTH_SCALE = 0.86; // a cabeça é um pouco mais achatada de frente pra trás do que de lado a lado
-
-const EYE_ANGLE = 0.5;
-const EYE_Y = -0.24;
-const EYE_ANGLE_R = 0.28;
-const EYE_Y_R = 0.16;
-
-const BROW_Y = -0.06;
-const BROW_ANGLE_R = 0.6;
-const BROW_Y_R = 0.09;
-const BROW_STRENGTH = 0.12;
-
-const MOUTH_Y = -0.66;
-const MOUTH_ANGLE_R = 0.15;
-const MOUTH_Y_R = 0.06;
-
-const NOSE_Y = -0.41;
-const NOSE_ANGLE_R = 0.19;
-const NOSE_Y_R = 0.22;
-const NOSE_STRENGTH_BRIDGE = 0.34;
-const NOSE_STRENGTH_TIP = 0.66;
-
-const EAR_SIDES = [-1, 1] as const;
-const EAR_Y = -0.34;
-const EAR_RADIUS = 0.15;
-const EAR_RING_POINTS = 11;
-const EAR_LOBE_POINTS = 4;
-
-const HEAD_NODE_COUNT = 480;
-const NEIGHBORS_PER_NODE = 2;
-const MAX_CONNECT_DISTANCE = 0.14;
-const INTERSECTION_DEGREE = 4;
-const PARTICLE_COUNT = 22;
-const PARTICLE_SPEED_MIN = 0.09;
-const PARTICLE_SPEED_MAX = 0.22;
-
-const NODE_SIZE = 0.028;
-const INTERSECTION_NODE_SIZE = 0.045; // ~50% menor que a versão anterior do desenho neural
-const PARTICLE_SIZE = 0.045;
-// Opacidade por nó varia com frontness (ver HeadNode) — lado do rosto bem mais visível que a
-// nuca, senão a nuvem de pontos lê como uma esfera genérica em vez de uma cabeça com um lado de
-// frente. Corte não-linear (só o hemisfério da frente ganha gradiente; o resto vai direto pro
-// alpha de fundo) pra criar um limite de silhueta mais nítido, não um degradê suave.
-const NODE_ALPHA_FRONT = 0.6;
-const NODE_ALPHA_BACK = 0.05;
-const INTERSECTION_ALPHA_FRONT = 0.9;
-const INTERSECTION_ALPHA_BACK = 0.15;
-
-function idleAlphaFor(frontness: number, isIntersection: boolean): number {
-  const blend = Math.max(0, frontness);
-  return isIntersection
-    ? lerp(INTERSECTION_ALPHA_BACK, INTERSECTION_ALPHA_FRONT, blend)
-    : lerp(NODE_ALPHA_BACK, NODE_ALPHA_FRONT, blend);
+interface FaceMeshData {
+  /** 938 × 3 floats: x, y, z de cada nó, já normalizados. */
+  nodes: number[];
+  /** 3.259 × 2 ints: pares de índice formando cada aresta. */
+  edges: number[];
+  /** Índices dos nós anatômicos (silhueta, sobrancelhas, olhos, nariz, lábios, mandíbula,
+   *  orelhas, linha central) — sempre contíguos, 0 a 490. O resto é preenchimento de malha. */
+  bright: number[];
 }
+const faceMesh = faceMeshJson as FaceMeshData;
+const ANATOMICAL_COUNT = faceMesh.bright.length;
+
+const FILL_NODE_SIZE = 0.028;
+const ANATOMICAL_NODE_SIZE = 0.045;
+const PARTICLE_SIZE = 0.045;
+
+// Opacidade em função de Z (saliência), não mais de "frontness" — a malha é uma calota frontal
+// com relevo, não uma cabeça fechada, então não existe mais um lado "de trás" pra apagar. Nariz,
+// testa e maçãs (mais salientes) acendem um pouco mais que o resto do mesmo grupo.
+const ANATOMICAL_ALPHA_BASE = 0.52;
+const ANATOMICAL_ALPHA_Z_BOOST = 0.32;
+const FILL_ALPHA_BASE = 0.09;
+const FILL_ALPHA_Z_BOOST = 0.12;
+
+// Enquanto o texto está visível, os estilhaços não somem — recuam pra essa fração da opacidade
+// de repouso e continuam à deriva atrás do texto, como plano de fundo vivo.
+const DISSOLVED_ALPHA_FACTOR = 0.45;
+
 const IDLE_JITTER = 0.01;
 // Amplitude do movimento lento dos estilhaços enquanto o texto está visível — bem maior e mais
 // lento que o jitter ambiente do rosto montado, pra ler como destroços flutuando, não como ruído.
 const DRIFT_AMPLITUDE = 0.07;
 
-// Rotação da cabeça acompanhando o mouse (só desktop com ponteiro fino) — mesmos ângulos/damping
-// da versão anterior, agora aplicados como rotação 3D real em vez de um tilt de CSS simulado.
+// Rotação do rosto acompanhando o mouse (só desktop com ponteiro fino). Contida de propósito: a
+// malha é uma casca frontal sem volume atrás, então virar demais expõe que não há nuca.
 const MAX_ROTATE_Y = 18;
 const MAX_ROTATE_X = 8;
 const ROTATE_RANGE_PX = 420;
 const ROTATE_DAMPING = 0.06;
 
-// Timings/eases idênticos à animação de explosão/reconstrução anterior (só reimplementados pra
-// atualizar buffers Three.js em vez de atributos SVG) — não foram alterados.
 const EXPLODE_NODE_DURATION = 0.7;
 const EXPLODE_NODE_MAX_DELAY = 0.25;
 const EXPLODE_TOTAL = EXPLODE_NODE_DURATION + EXPLODE_NODE_MAX_DELAY;
@@ -109,8 +64,7 @@ const REFORM_LINES_DELAY = 0.3;
 const REFORM_LINES_DURATION = 0.6;
 
 // Opacidade "de repouso" das linhas/partículas — o fade de explosão/reconstrução anima um fator
-// 0..1 que multiplica por cima desse valor, nunca substitui (senão elas ficam presas em opacidade
-// máxima depois de reconstruir).
+// que multiplica por cima desse valor, nunca substitui (senão elas ficam presas depois de animar).
 const LINES_BASE_OPACITY = 0.16;
 const PARTICLES_BASE_OPACITY = 0.9;
 
@@ -122,53 +76,6 @@ function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-function radiusAtHeight(y: number): number {
-  for (let i = 0; i < PROFILE.length - 1; i++) {
-    const a = PROFILE[i];
-    const b = PROFILE[i + 1];
-    if (y <= a.y && y >= b.y) {
-      const t = (a.y - y) / (a.y - b.y || 1);
-      return a.r + (b.r - a.r) * t;
-    }
-  }
-  return y > PROFILE[0].y ? PROFILE[0].r : PROFILE[PROFILE.length - 1].r;
-}
-
-function insideEyeSocket(angle: number, y: number): boolean {
-  for (const side of [-1, 1]) {
-    const da = (angle - side * EYE_ANGLE) / EYE_ANGLE_R;
-    const dy = (y - EYE_Y) / EYE_Y_R;
-    if (da * da + dy * dy < 1) return true;
-  }
-  return false;
-}
-
-function insideMouth(angle: number, y: number): boolean {
-  const da = angle / (MOUTH_ANGLE_R * 1.6);
-  const dy = (y - MOUTH_Y) / (MOUTH_Y_R * 1.6);
-  return da * da + dy * dy < 1;
-}
-
-/** Empurra o ponto pra fora — cria o nariz sem precisar de uma malha à parte. Mais saliente
- *  embaixo (ponta) do que em cima (ponte), pra não ficar um bulbo simétrico. */
-function noseBulge(angle: number, y: number): number {
-  const da = angle / NOSE_ANGLE_R;
-  const dy = (y - NOSE_Y) / NOSE_Y_R;
-  const d2 = da * da + dy * dy;
-  if (d2 >= 1) return 0;
-  const strength = y > NOSE_Y ? NOSE_STRENGTH_BRIDGE : NOSE_STRENGTH_TIP;
-  return (1 - d2) * strength;
-}
-
-/** Leve saliência acima dos olhos — sem isso o rosto fica liso demais entre a testa e os olhos. */
-function browBulge(angle: number, y: number): number {
-  const da = angle / BROW_ANGLE_R;
-  const dy = (y - BROW_Y) / BROW_Y_R;
-  const d2 = da * da + dy * dy;
-  if (d2 >= 1) return 0;
-  return (1 - d2) * BROW_STRENGTH;
-}
-
 interface HeadNode {
   baseX: number;
   baseY: number;
@@ -176,189 +83,80 @@ interface HeadNode {
   x: number;
   y: number;
   z: number;
-  /** cos(angle) no momento em que o nó foi gerado: 1 = rosto (frente), -1 = nuca (fundo do
-   *  crânio) — fixo por nó e gira junto com a cabeça, usado só pra dar mais brilho ao lado do
-   *  rosto do que ao "fundo" (sem isso, os pontos da nuca aparecem por trás com o mesmo peso
-   *  visual dos pontos do rosto e a nuvem lê como uma esfera genérica, não como um rosto). */
-  frontness: number;
 }
 
-function makeNode(x: number, y: number, z: number, frontness: number): HeadNode {
-  return { baseX: x, baseY: y, baseZ: z, x, y, z, frontness };
+function makeNode(x: number, y: number, z: number): HeadNode {
+  return { baseX: x, baseY: y, baseZ: z, x, y, z };
 }
 
-// A maioria dos nós nasce no hemisfério da frente — não é só estética, é o que faz o rosto
-// "ganhar" da nuca em densidade de pontos, além do gradiente de opacidade abaixo.
-const FRONT_HEMISPHERE_BIAS = 0.82;
+function isFinePointer(): boolean {
+  return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+}
+function isCoarsePointer(): boolean {
+  return window.matchMedia('(pointer: coarse)').matches;
+}
+function prefersReducedMotion(): boolean {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
 
-function buildHeadShellNodes(count: number): HeadNode[] {
-  const nodes: HeadNode[] = [];
-  const minY = PROFILE[PROFILE.length - 1].y;
-  const maxY = PROFILE[0].y;
-  let attempts = 0;
-
-  while (nodes.length < count && attempts < count * 60) {
-    attempts += 1;
-    const y = minY + Math.random() * (maxY - minY);
-    const maxR = radiusAtHeight(y);
-    if (maxR < 0.03) continue;
-
-    const angle =
-      Math.random() < FRONT_HEMISPHERE_BIAS
-        ? (Math.random() * 2 - 1) * (Math.PI / 2)
-        : (Math.random() * 2 - 1) * Math.PI;
-    if (insideEyeSocket(angle, y) || insideMouth(angle, y)) continue;
-
-    const shellFrac = 0.82 + Math.random() * 0.18 + noseBulge(angle, y) + browBulge(angle, y);
-    const r = maxR * shellFrac;
-
-    nodes.push(makeNode(Math.sin(angle) * r, y, Math.cos(angle) * r * DEPTH_SCALE, Math.cos(angle)));
-  }
-
-  return nodes;
+function mixToWhite(amount: number): THREE.Color {
+  return ACCENT_COLOR.clone().lerp(WHITE_COLOR, amount);
 }
 
 /**
- * Orelha com alguma estrutura reconhecível em vez de um borrão de pontos aleatórios: um "C" (a
- * hélice externa, aberta do lado que encosta na cabeça), um ponto central (concha) e um pequeno
- * aglomerado embaixo (lóbulo).
+ * Monta os nós/arestas a partir da malha fixa. No mobile (ponteiro grosso), mantém os 491 nós
+ * anatômicos sempre e descarta metade do preenchimento (e as arestas que dependiam só dele) —
+ * os índices anatômicos não mudam de posição no remapeamento porque são sempre os primeiros a
+ * entrar, então continuam ocupando 0..490 depois do filtro.
  */
-function buildEarNodes(): HeadNode[] {
+function buildMeshNodeSet(coarse: boolean) {
+  const totalNodes = faceMesh.nodes.length / 3;
+  const keep = new Uint8Array(totalNodes);
+  for (let i = 0; i < totalNodes; i++) {
+    keep[i] = i < ANATOMICAL_COUNT || !coarse || i % 2 === 0 ? 1 : 0;
+  }
+
+  const remap = new Int32Array(totalNodes).fill(-1);
   const nodes: HeadNode[] = [];
-  const baseR = radiusAtHeight(EAR_Y) * 1.02;
-
-  for (const side of EAR_SIDES) {
-    const cx = side * baseR;
-
-    for (let i = 0; i < EAR_RING_POINTS; i++) {
-      const t = i / (EAR_RING_POINTS - 1);
-      const angle = lerp(-2.3, 2.3, t);
-      const ru = Math.cos(angle) * EAR_RADIUS;
-      const rv = Math.sin(angle) * EAR_RADIUS * 1.2;
-      const jitter = (Math.random() - 0.5) * 0.012;
-      nodes.push(makeNode(cx + side * (EAR_RADIUS * 0.4 + ru * 0.6 + jitter), EAR_Y + rv, side * ru * 0.35 + jitter, 0));
-    }
-
-    nodes.push(makeNode(cx + side * EAR_RADIUS * 0.35, EAR_Y, side * EAR_RADIUS * 0.12, 0));
-
-    for (let i = 0; i < EAR_LOBE_POINTS; i++) {
-      const v = -EAR_RADIUS * 1.1 - Math.random() * 0.05;
-      const u = (Math.random() - 0.5) * 0.06;
-      nodes.push(makeNode(cx + side * (EAR_RADIUS * 0.3 + u), EAR_Y + v, side * u, 0));
-    }
+  let zMax = 0.0001;
+  for (let i = 0; i < totalNodes; i++) {
+    if (!keep[i]) continue;
+    remap[i] = nodes.length;
+    const x = faceMesh.nodes[i * 3];
+    const y = faceMesh.nodes[i * 3 + 1];
+    const z = faceMesh.nodes[i * 3 + 2];
+    if (z > zMax) zMax = z;
+    nodes.push(makeNode(x, y, z));
   }
 
-  return nodes;
+  const connections: Array<[number, number]> = [];
+  for (let i = 0; i < faceMesh.edges.length; i += 2) {
+    const a = faceMesh.edges[i];
+    const b = faceMesh.edges[i + 1];
+    if (keep[a] && keep[b]) connections.push([remap[a], remap[b]]);
+  }
+
+  const anatomicalIndices: number[] = [];
+  const fillIndices: number[] = [];
+  for (let i = 0; i < totalNodes; i++) {
+    if (!keep[i]) continue;
+    if (i < ANATOMICAL_COUNT) anatomicalIndices.push(remap[i]);
+    else fillIndices.push(remap[i]);
+  }
+
+  return { nodes, connections, anatomicalIndices, fillIndices, zMax };
 }
 
-const MOUTH_LINE_POINTS = 9;
+function buildNodeAlpha(nodeCount: number, anatomicalIndices: number[], nodes: HeadNode[], zMax: number): number[] {
+  const isAnatomical = new Uint8Array(nodeCount);
+  for (const i of anatomicalIndices) isAnatomical[i] = 1;
 
-/** Boca como uma linha deliberada (não só o vazio deixado pela exclusão) — sutilmente saliente,
- *  com uma leve curvatura pra cima nas pontas, mais "IA estilizada" do que um buraco no rosto. */
-function buildMouthNodes(): HeadNode[] {
-  const nodes: HeadNode[] = [];
-  const maxR = radiusAtHeight(MOUTH_Y);
-
-  for (let i = 0; i < MOUTH_LINE_POINTS; i++) {
-    const t = i / (MOUTH_LINE_POINTS - 1) - 0.5;
-    const angle = t * MOUTH_ANGLE_R * 2.2;
-    const curve = Math.cos(t * Math.PI) * 0.014;
-    const y = MOUTH_Y + curve;
-    const r = maxR * 1.008;
-    nodes.push(makeNode(Math.sin(angle) * r, y, Math.cos(angle) * r * DEPTH_SCALE, Math.cos(angle)));
-  }
-
-  for (let i = 0; i < MOUTH_LINE_POINTS - 3; i++) {
-    const t = (i + 1) / (MOUTH_LINE_POINTS - 2) - 0.5;
-    const angle = t * MOUTH_ANGLE_R * 1.7;
-    const y = MOUTH_Y - 0.03;
-    const r = maxR * 0.995;
-    nodes.push(makeNode(Math.sin(angle) * r, y, Math.cos(angle) * r * DEPTH_SCALE, Math.cos(angle)));
-  }
-
-  return nodes;
-}
-
-function buildHeadNodes(): HeadNode[] {
-  return [...buildHeadShellNodes(HEAD_NODE_COUNT), ...buildEarNodes(), ...buildMouthNodes()];
-}
-
-/**
- * Une componentes desconectados ao maior grafo (mesma garantia de "uma peça só" da versão 2D,
- * só que por distância euclidiana 3D — mantido local porque o util compartilhado só entende 2D).
- */
-function connectComponents3D(nodes: HeadNode[], pairs: Array<[number, number]>): Array<[number, number]> {
-  const parent = nodes.map((_, i) => i);
-  function find(i: number): number {
-    while (parent[i] !== i) {
-      parent[i] = parent[parent[i]];
-      i = parent[i];
-    }
-    return i;
-  }
-  function union(a: number, b: number) {
-    parent[find(a)] = find(b);
-  }
-  for (const [a, b] of pairs) union(a, b);
-
-  const result = [...pairs];
-  for (;;) {
-    const groups = new Map<number, number[]>();
-    nodes.forEach((_, i) => {
-      const root = find(i);
-      const group = groups.get(root);
-      if (group) group.push(i);
-      else groups.set(root, [i]);
-    });
-    if (groups.size <= 1) break;
-
-    const components = [...groups.values()];
-    let best: { i: number; j: number; d: number } | null = null;
-    for (let a = 0; a < components.length; a++) {
-      for (let b = a + 1; b < components.length; b++) {
-        for (const i of components[a]) {
-          for (const j of components[b]) {
-            const d = Math.hypot(
-              nodes[i].baseX - nodes[j].baseX,
-              nodes[i].baseY - nodes[j].baseY,
-              nodes[i].baseZ - nodes[j].baseZ,
-            );
-            if (!best || d < best.d) best = { i, j, d };
-          }
-        }
-      }
-    }
-    if (!best) break;
-    result.push([best.i, best.j]);
-    union(best.i, best.j);
-  }
-
-  return result;
-}
-
-function buildConnections(nodes: HeadNode[]): Array<[number, number]> {
-  const seen = new Set<string>();
-  const pairs: Array<[number, number]> = [];
-
-  nodes.forEach((node, i) => {
-    const nearest = nodes
-      .map((other, j) => ({
-        j,
-        d: i === j ? Infinity : Math.hypot(node.baseX - other.baseX, node.baseY - other.baseY, node.baseZ - other.baseZ),
-      }))
-      .filter((entry) => entry.d < MAX_CONNECT_DISTANCE)
-      .sort((a, b) => a.d - b.d)
-      .slice(0, NEIGHBORS_PER_NODE);
-
-    for (const { j } of nearest) {
-      const key = i < j ? `${i}-${j}` : `${j}-${i}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      pairs.push([i, j]);
-    }
+  return nodes.map((node, i) => {
+    const zFactor = Math.max(0, Math.min(1, node.baseZ / zMax));
+    return isAnatomical[i]
+      ? ANATOMICAL_ALPHA_BASE + zFactor * ANATOMICAL_ALPHA_Z_BOOST
+      : FILL_ALPHA_BASE + zFactor * FILL_ALPHA_Z_BOOST;
   });
-
-  return connectComponents3D(nodes, pairs);
 }
 
 interface Particle {
@@ -366,6 +164,10 @@ interface Particle {
   progress: number;
   speed: number;
 }
+
+const PARTICLE_COUNT = 22;
+const PARTICLE_SPEED_MIN = 0.09;
+const PARTICLE_SPEED_MAX = 0.22;
 
 function buildParticles(connectionCount: number): Particle[] {
   return Array.from({ length: Math.min(PARTICLE_COUNT, connectionCount) }, () => ({
@@ -375,38 +177,12 @@ function buildParticles(connectionCount: number): Particle[] {
   }));
 }
 
-function buildFace() {
-  const nodes = buildHeadNodes();
-  const connections = buildConnections(nodes);
-
-  const degree = new Array(nodes.length).fill(0);
-  for (const [a, b] of connections) {
-    degree[a] += 1;
-    degree[b] += 1;
-  }
-  const intersectionIndices: number[] = [];
-  const regularIndices: number[] = [];
-  nodes.forEach((_, i) => {
-    if (degree[i] >= INTERSECTION_DEGREE) intersectionIndices.push(i);
-    else regularIndices.push(i);
-  });
-
-  const nodeAlpha = nodes.map((node, i) => idleAlphaFor(node.frontness, degree[i] >= INTERSECTION_DEGREE));
-
+function buildFace(coarse: boolean) {
+  const { nodes, connections, anatomicalIndices, fillIndices, zMax } = buildMeshNodeSet(coarse);
+  const nodeAlpha = buildNodeAlpha(nodes.length, anatomicalIndices, nodes, zMax);
   const particles = buildParticles(connections.length);
 
-  return { nodes, connections, intersectionIndices, regularIndices, nodeAlpha, particles };
-}
-
-function isFinePointer(): boolean {
-  return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-}
-function prefersReducedMotion(): boolean {
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
-function mixToWhite(amount: number): THREE.Color {
-  return ACCENT_COLOR.clone().lerp(WHITE_COLOR, amount);
+  return { nodes, connections, anatomicalIndices, fillIndices, nodeAlpha, particles };
 }
 
 type FaceData = ReturnType<typeof buildFace>;
@@ -428,52 +204,52 @@ interface HeadSceneProps {
 }
 
 function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine, onDissolvedChange }: HeadSceneProps) {
-  const { nodes, connections, intersectionIndices, regularIndices, nodeAlpha, particles } = data;
+  const { nodes, connections, anatomicalIndices, fillIndices, nodeAlpha, particles } = data;
 
   const groupRef = useRef<THREE.Group>(null);
-  const regularGeometryRef = useRef<THREE.BufferGeometry>(null);
-  const intersectionGeometryRef = useRef<THREE.BufferGeometry>(null);
+  const fillGeometryRef = useRef<THREE.BufferGeometry>(null);
+  const anatomicalGeometryRef = useRef<THREE.BufferGeometry>(null);
   const linesGeometryRef = useRef<THREE.BufferGeometry>(null);
   const linesMaterialRef = useRef<THREE.LineBasicMaterial>(null);
   const particlesGeometryRef = useRef<THREE.BufferGeometry>(null);
   const particlesMaterialRef = useRef<THREE.PointsMaterial>(null);
 
   const buffers = useMemo(() => {
-    const regularPositions = new Float32Array(regularIndices.length * 3);
-    const regularColors = new Float32Array(regularIndices.length * 4);
-    const intersectionPositions = new Float32Array(intersectionIndices.length * 3);
-    const intersectionColors = new Float32Array(intersectionIndices.length * 4);
+    const fillPositions = new Float32Array(fillIndices.length * 3);
+    const fillColors = new Float32Array(fillIndices.length * 4);
+    const anatomicalPositions = new Float32Array(anatomicalIndices.length * 3);
+    const anatomicalColors = new Float32Array(anatomicalIndices.length * 4);
     const linePositions = new Float32Array(connections.length * 2 * 3);
     const particlePositions = new Float32Array(particles.length * 3);
 
-    regularIndices.forEach((nodeIndex, i) => {
+    fillIndices.forEach((nodeIndex, i) => {
       const node = nodes[nodeIndex];
-      regularPositions[i * 3] = node.x;
-      regularPositions[i * 3 + 1] = node.y;
-      regularPositions[i * 3 + 2] = node.z;
-      regularColors[i * 4] = ACCENT_COLOR.r;
-      regularColors[i * 4 + 1] = ACCENT_COLOR.g;
-      regularColors[i * 4 + 2] = ACCENT_COLOR.b;
-      regularColors[i * 4 + 3] = nodeAlpha[nodeIndex];
+      fillPositions[i * 3] = node.x;
+      fillPositions[i * 3 + 1] = node.y;
+      fillPositions[i * 3 + 2] = node.z;
+      fillColors[i * 4] = ACCENT_COLOR.r;
+      fillColors[i * 4 + 1] = ACCENT_COLOR.g;
+      fillColors[i * 4 + 2] = ACCENT_COLOR.b;
+      fillColors[i * 4 + 3] = nodeAlpha[nodeIndex];
     });
 
-    const intersectionTint = mixToWhite(0.4);
-    intersectionIndices.forEach((nodeIndex, i) => {
+    const anatomicalTint = mixToWhite(0.4);
+    anatomicalIndices.forEach((nodeIndex, i) => {
       const node = nodes[nodeIndex];
-      intersectionPositions[i * 3] = node.x;
-      intersectionPositions[i * 3 + 1] = node.y;
-      intersectionPositions[i * 3 + 2] = node.z;
-      intersectionColors[i * 4] = intersectionTint.r;
-      intersectionColors[i * 4 + 1] = intersectionTint.g;
-      intersectionColors[i * 4 + 2] = intersectionTint.b;
-      intersectionColors[i * 4 + 3] = nodeAlpha[nodeIndex];
+      anatomicalPositions[i * 3] = node.x;
+      anatomicalPositions[i * 3 + 1] = node.y;
+      anatomicalPositions[i * 3 + 2] = node.z;
+      anatomicalColors[i * 4] = anatomicalTint.r;
+      anatomicalColors[i * 4 + 1] = anatomicalTint.g;
+      anatomicalColors[i * 4 + 2] = anatomicalTint.b;
+      anatomicalColors[i * 4 + 3] = nodeAlpha[nodeIndex];
     });
 
-    return { regularPositions, regularColors, intersectionPositions, intersectionColors, linePositions, particlePositions };
-  }, [nodes, connections, intersectionIndices, regularIndices, nodeAlpha, particles]);
+    return { fillPositions, fillColors, anatomicalPositions, anatomicalColors, linePositions, particlePositions };
+  }, [nodes, connections, anatomicalIndices, fillIndices, nodeAlpha, particles]);
 
   useEffect(() => {
-    for (const geometry of [regularGeometryRef.current, intersectionGeometryRef.current, linesGeometryRef.current, particlesGeometryRef.current]) {
+    for (const geometry of [fillGeometryRef.current, anatomicalGeometryRef.current, linesGeometryRef.current, particlesGeometryRef.current]) {
       const position = geometry?.attributes.position;
       if (position instanceof THREE.BufferAttribute) position.setUsage(THREE.DynamicDrawUsage);
       const color = geometry?.attributes.color;
@@ -525,8 +301,8 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
     }
   }
 
-  function writeNodePosition(nodeIndex: number, listIndex: number, isIntersection: boolean) {
-    const geometry = isIntersection ? intersectionGeometryRef.current : regularGeometryRef.current;
+  function writeNodePosition(nodeIndex: number, listIndex: number, isAnatomical: boolean) {
+    const geometry = isAnatomical ? anatomicalGeometryRef.current : fillGeometryRef.current;
     const position = geometry?.attributes.position as THREE.BufferAttribute | undefined;
     if (!position) return;
     const node = nodes[nodeIndex];
@@ -551,10 +327,10 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
           node.z = node.baseZ + Math.sin(elapsed * 0.3 + i * 0.7) * IDLE_JITTER;
         });
 
-        regularIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, false));
-        intersectionIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, true));
-        if (regularGeometryRef.current) regularGeometryRef.current.attributes.position.needsUpdate = true;
-        if (intersectionGeometryRef.current) intersectionGeometryRef.current.attributes.position.needsUpdate = true;
+        fillIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, false));
+        anatomicalIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, true));
+        if (fillGeometryRef.current) fillGeometryRef.current.attributes.position.needsUpdate = true;
+        if (anatomicalGeometryRef.current) anatomicalGeometryRef.current.attributes.position.needsUpdate = true;
 
         writeConnectionsAndParticles();
       }
@@ -591,10 +367,12 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
           node.z = target.z + Math.sin(elapsed * 0.1 + i * 0.7) * DRIFT_AMPLITUDE;
         });
 
-        regularIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, false));
-        intersectionIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, true));
-        if (regularGeometryRef.current) regularGeometryRef.current.attributes.position.needsUpdate = true;
-        if (intersectionGeometryRef.current) intersectionGeometryRef.current.attributes.position.needsUpdate = true;
+        fillIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, false));
+        anatomicalIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, true));
+        if (fillGeometryRef.current) fillGeometryRef.current.attributes.position.needsUpdate = true;
+        if (anatomicalGeometryRef.current) anatomicalGeometryRef.current.attributes.position.needsUpdate = true;
+
+        writeConnectionsAndParticles();
       }
     }
   });
@@ -611,34 +389,34 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
         node.z = lerp(node.baseZ, targets[i].z, eased);
       });
 
-      regularIndices.forEach((nodeIndex, i) => {
+      fillIndices.forEach((nodeIndex, i) => {
         writeNodePosition(nodeIndex, i, false);
         const localT = Math.max(0, Math.min(1, (globalTime - delays[nodeIndex]) / EXPLODE_NODE_DURATION));
-        const alpha = lerp(nodeAlpha[nodeIndex], 0, easeExplode(localT));
-        const color = regularGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
+        const alpha = lerp(nodeAlpha[nodeIndex], nodeAlpha[nodeIndex] * DISSOLVED_ALPHA_FACTOR, easeExplode(localT));
+        const color = fillGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
         color?.setW(i, alpha);
       });
-      intersectionIndices.forEach((nodeIndex, i) => {
+      anatomicalIndices.forEach((nodeIndex, i) => {
         writeNodePosition(nodeIndex, i, true);
         const localT = Math.max(0, Math.min(1, (globalTime - delays[nodeIndex]) / EXPLODE_NODE_DURATION));
-        const alpha = lerp(nodeAlpha[nodeIndex], 0, easeExplode(localT));
-        const color = intersectionGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
+        const alpha = lerp(nodeAlpha[nodeIndex], nodeAlpha[nodeIndex] * DISSOLVED_ALPHA_FACTOR, easeExplode(localT));
+        const color = anatomicalGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
         color?.setW(i, alpha);
       });
 
-      if (regularGeometryRef.current) {
-        regularGeometryRef.current.attributes.position.needsUpdate = true;
-        regularGeometryRef.current.attributes.color.needsUpdate = true;
+      if (fillGeometryRef.current) {
+        fillGeometryRef.current.attributes.position.needsUpdate = true;
+        fillGeometryRef.current.attributes.color.needsUpdate = true;
       }
-      if (intersectionGeometryRef.current) {
-        intersectionGeometryRef.current.attributes.position.needsUpdate = true;
-        intersectionGeometryRef.current.attributes.color.needsUpdate = true;
+      if (anatomicalGeometryRef.current) {
+        anatomicalGeometryRef.current.attributes.position.needsUpdate = true;
+        anatomicalGeometryRef.current.attributes.color.needsUpdate = true;
       }
 
       writeConnectionsAndParticles();
 
       const groupT = Math.max(0, Math.min(1, globalTime / EXPLODE_LINES_DURATION));
-      const fade = lerp(1, 0, easeLines(groupT));
+      const fade = lerp(1, DISSOLVED_ALPHA_FACTOR, easeLines(groupT));
       if (linesMaterialRef.current) linesMaterialRef.current.opacity = LINES_BASE_OPACITY * fade;
       if (particlesMaterialRef.current) particlesMaterialRef.current.opacity = PARTICLES_BASE_OPACITY * fade;
     }
@@ -654,36 +432,57 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
         node.z = lerp(starts[i].z, node.baseZ, eased);
       });
 
-      regularIndices.forEach((nodeIndex, i) => {
+      fillIndices.forEach((nodeIndex, i) => {
         writeNodePosition(nodeIndex, i, false);
         const localT = Math.max(0, Math.min(1, (globalTime - delays[nodeIndex]) / REFORM_NODE_DURATION));
-        const alpha = lerp(0, nodeAlpha[nodeIndex], easeReform(localT));
-        const color = regularGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
+        const alpha = lerp(nodeAlpha[nodeIndex] * DISSOLVED_ALPHA_FACTOR, nodeAlpha[nodeIndex], easeReform(localT));
+        const color = fillGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
         color?.setW(i, alpha);
       });
-      intersectionIndices.forEach((nodeIndex, i) => {
+      anatomicalIndices.forEach((nodeIndex, i) => {
         writeNodePosition(nodeIndex, i, true);
         const localT = Math.max(0, Math.min(1, (globalTime - delays[nodeIndex]) / REFORM_NODE_DURATION));
-        const alpha = lerp(0, nodeAlpha[nodeIndex], easeReform(localT));
-        const color = intersectionGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
+        const alpha = lerp(nodeAlpha[nodeIndex] * DISSOLVED_ALPHA_FACTOR, nodeAlpha[nodeIndex], easeReform(localT));
+        const color = anatomicalGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
         color?.setW(i, alpha);
       });
 
-      if (regularGeometryRef.current) {
-        regularGeometryRef.current.attributes.position.needsUpdate = true;
-        regularGeometryRef.current.attributes.color.needsUpdate = true;
+      if (fillGeometryRef.current) {
+        fillGeometryRef.current.attributes.position.needsUpdate = true;
+        fillGeometryRef.current.attributes.color.needsUpdate = true;
       }
-      if (intersectionGeometryRef.current) {
-        intersectionGeometryRef.current.attributes.position.needsUpdate = true;
-        intersectionGeometryRef.current.attributes.color.needsUpdate = true;
+      if (anatomicalGeometryRef.current) {
+        anatomicalGeometryRef.current.attributes.position.needsUpdate = true;
+        anatomicalGeometryRef.current.attributes.color.needsUpdate = true;
       }
 
       writeConnectionsAndParticles();
 
       const groupT = Math.max(0, Math.min(1, (globalTime - REFORM_LINES_DELAY) / REFORM_LINES_DURATION));
-      const fade = lerp(0, 1, easeLines(groupT));
+      const fade = lerp(DISSOLVED_ALPHA_FACTOR, 1, easeLines(groupT));
       if (linesMaterialRef.current) linesMaterialRef.current.opacity = LINES_BASE_OPACITY * fade;
       if (particlesMaterialRef.current) particlesMaterialRef.current.opacity = PARTICLES_BASE_OPACITY * fade;
+    }
+
+    // Sem animação (usado só em prefers-reduced-motion): aplica a opacidade de repouso (dimmed
+    // ou cheia) na hora, sem tween — senão os fragmentos ficam presos na opacidade cheia atrás
+    // do texto, já que o caminho normal que os apaga um pouco é o próprio tween do GSAP.
+    function setDimmed(dimmed: boolean) {
+      const factor = dimmed ? DISSOLVED_ALPHA_FACTOR : 1;
+
+      fillIndices.forEach((nodeIndex, i) => {
+        const color = fillGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
+        color?.setW(i, nodeAlpha[nodeIndex] * factor);
+      });
+      anatomicalIndices.forEach((nodeIndex, i) => {
+        const color = anatomicalGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
+        color?.setW(i, nodeAlpha[nodeIndex] * factor);
+      });
+      if (fillGeometryRef.current) fillGeometryRef.current.attributes.color.needsUpdate = true;
+      if (anatomicalGeometryRef.current) anatomicalGeometryRef.current.attributes.color.needsUpdate = true;
+
+      if (linesMaterialRef.current) linesMaterialRef.current.opacity = LINES_BASE_OPACITY * factor;
+      if (particlesMaterialRef.current) particlesMaterialRef.current.opacity = PARTICLES_BASE_OPACITY * factor;
     }
 
     function explode() {
@@ -692,6 +491,7 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
       onDissolvedChange(true);
 
       if (reducedMotion) {
+        setDimmed(true);
         modeRef.current = 'dissolved';
         return;
       }
@@ -726,6 +526,7 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
       onDissolvedChange(false);
 
       if (reducedMotion) {
+        setDimmed(false);
         modeRef.current = 'idle';
         return;
       }
@@ -757,19 +558,19 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
   return (
     <group ref={groupRef}>
       <points>
-        <bufferGeometry ref={regularGeometryRef}>
-          <bufferAttribute attach="attributes-position" args={[buffers.regularPositions, 3]} />
-          <bufferAttribute attach="attributes-color" args={[buffers.regularColors, 4]} />
+        <bufferGeometry ref={fillGeometryRef}>
+          <bufferAttribute attach="attributes-position" args={[buffers.fillPositions, 3]} />
+          <bufferAttribute attach="attributes-color" args={[buffers.fillColors, 4]} />
         </bufferGeometry>
-        <pointsMaterial vertexColors transparent sizeAttenuation depthWrite={false} size={NODE_SIZE} />
+        <pointsMaterial vertexColors transparent sizeAttenuation depthWrite={false} size={FILL_NODE_SIZE} />
       </points>
 
       <points>
-        <bufferGeometry ref={intersectionGeometryRef}>
-          <bufferAttribute attach="attributes-position" args={[buffers.intersectionPositions, 3]} />
-          <bufferAttribute attach="attributes-color" args={[buffers.intersectionColors, 4]} />
+        <bufferGeometry ref={anatomicalGeometryRef}>
+          <bufferAttribute attach="attributes-position" args={[buffers.anatomicalPositions, 3]} />
+          <bufferAttribute attach="attributes-color" args={[buffers.anatomicalColors, 4]} />
         </bufferGeometry>
-        <pointsMaterial vertexColors transparent sizeAttenuation depthWrite={false} size={INTERSECTION_NODE_SIZE} />
+        <pointsMaterial vertexColors transparent sizeAttenuation depthWrite={false} size={ANATOMICAL_NODE_SIZE} />
       </points>
 
       <lineSegments>
@@ -841,11 +642,14 @@ interface FaceGraphicProps {
 }
 
 /**
- * Cabeça humana em 3D (Three.js/R3F) renderizada como constelação — girada em torno do eixo Y a
- * partir de um perfil validado (garante forma redonda sem auto-interseção), com olhos/boca como
- * reentrâncias e nariz como saliência. Acompanha o mouse virando de verdade em 3D — olha pra tela
- * em repouso. Clique dispara a mesma explosão/reconstrução de sempre e revela o texto "sobre
- * mim"; clicar no texto reconstrói. Nunca toca o cursor nativo, só o próprio desenho.
+ * Rosto humano em 3D (Three.js/R3F), constelação sobre uma malha fixa (938 nós, 3.259 arestas)
+ * extraída da referência visual — não mais gerada por parâmetros. Os 491 nós anatômicos (olhos,
+ * nariz, lábios, sobrancelhas, mandíbula, orelhas, silhueta) brilham mais que o preenchimento da
+ * malha. Acompanha o mouse virando de verdade em 3D, contido a ±18°/±8° (a malha é uma casca
+ * frontal, não tem volume atrás). Um clique — ou Enter/Espaço no controle focável — dispara a
+ * explosão e revela o texto "sobre mim"; os estilhaços continuam visíveis e à deriva atrás do
+ * texto, não somem. Clicar no texto ou no botão "voltar" reconstrói o rosto. Nunca toca o cursor
+ * nativo, só o próprio desenho.
  */
 export function FaceGraphic({ className }: FaceGraphicProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -853,7 +657,7 @@ export function FaceGraphic({ className }: FaceGraphicProps) {
 
   const dataRef = useRef<FaceData | null>(null);
   if (dataRef.current === null) {
-    dataRef.current = buildFace();
+    dataRef.current = buildFace(isCoarsePointer());
   }
 
   const modeRef = useRef<Mode>('idle');
@@ -866,42 +670,80 @@ export function FaceGraphic({ className }: FaceGraphicProps) {
 
   return (
     <div ref={wrapperRef} className={className} style={{ position: 'relative' }}>
-      <div className="h-full w-full cursor-pointer" onClick={() => controlsRef.current.explode()}>
-        <Canvas
-          camera={{ position: [0, 0, 2.85], fov: 42 }}
-          dpr={[1, 2]}
-          gl={{ antialias: true, alpha: true }}
-          frameloop={frameloop}
-        >
-          <HeadScene
-            data={dataRef.current}
-            modeRef={modeRef}
-            controlsRef={controlsRef}
-            wrapperRef={wrapperRef}
-            reducedMotion={reducedMotion}
-            fine={fine}
-            onDissolvedChange={setDissolved}
-          />
-        </Canvas>
-      </div>
+      <button
+        type="button"
+        onClick={() => controlsRef.current.explode()}
+        aria-label="Revelar mais sobre Carlos Rafael"
+        aria-expanded={dissolved}
+        tabIndex={dissolved ? -1 : undefined}
+        className="outline-none block h-full w-full cursor-pointer appearance-none border-0 bg-transparent p-0 focus-visible:outline-solid focus-visible:outline-accent focus-visible:outline-2 focus-visible:outline-offset-4"
+      >
+        <div aria-hidden="true" className="h-full w-full">
+          <Canvas
+            camera={{ position: [0, 0, 2.85], fov: 42 }}
+            dpr={[1, 2]}
+            gl={{ antialias: true, alpha: true }}
+            frameloop={frameloop}
+          >
+            <HeadScene
+              data={dataRef.current}
+              modeRef={modeRef}
+              controlsRef={controlsRef}
+              wrapperRef={wrapperRef}
+              reducedMotion={reducedMotion}
+              fine={fine}
+              onDissolvedChange={setDissolved}
+            />
+          </Canvas>
+        </div>
+      </button>
 
       {/* fixed (não absolute dentro do próprio gráfico) pra aparecer no meio da tela — clicável
-          quando visível pra reconstruir o rosto. */}
+          quando visível pra reconstruir o rosto. Sem scrim de tela cheia: os estilhaços continuam
+          visíveis e à deriva atrás do texto, só a coluna de texto ganha um véu localizado. */}
       <div
         onClick={() => controlsRef.current.reform()}
         className={`fixed inset-0 z-(--z-mobile-menu) flex items-center justify-center p-4 transition-opacity duration-500 sm:p-8 ${dissolved ? 'pointer-events-auto cursor-pointer opacity-100' : 'pointer-events-none opacity-0'}`}
       >
-        <div aria-hidden="true" className="bg-background/85 absolute inset-0" />
-        <div className="relative max-h-[80vh] max-w-lg overflow-y-auto text-left font-mono text-[10px] leading-relaxed sm:text-xs">
-          {CODE_LINES.map((line, index) => (
-            <p
-              key={index}
-              className={`${line.className} transition-opacity duration-400 ease-out ${dissolved ? 'opacity-100' : 'opacity-0'}`}
-              style={{ transitionDelay: dissolved ? `${index * 70}ms` : '0ms' }}
+        <div className="relative max-h-[80vh] max-w-lg overflow-y-auto">
+          {/* Véu localizado, só atrás do bloco de texto — cantos arredondados generosos em vez de
+              uma máscara radial: um degradê elíptico deixa os cantos de um bloco alto e estreito
+              (como no mobile) mal cobertos, sem escurecer o suficiente pra manter o contraste. */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute -inset-x-6 -inset-y-6 rounded-[2.5rem] sm:-inset-x-12 sm:-inset-y-10"
+            style={{
+              backgroundColor: 'rgba(10, 10, 10, 0.35)',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+            }}
+          />
+
+          {dissolved && (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                controlsRef.current.reform();
+              }}
+              aria-label="Voltar para a visualização do rosto"
+              className="outline-none relative float-right -mt-1 -mr-1 mb-2 font-mono text-[10px] tracking-wide text-muted uppercase hover:text-foreground focus-visible:outline-solid focus-visible:outline-accent focus-visible:outline-2 focus-visible:outline-offset-2 sm:text-xs"
             >
-              {line.text}
-            </p>
-          ))}
+              Voltar ×
+            </button>
+          )}
+
+          <div className="relative clear-both text-left font-mono text-[10px] leading-relaxed sm:text-xs">
+            {CODE_LINES.map((line, index) => (
+              <p
+                key={index}
+                className={`${line.className} transition-opacity duration-400 ease-out ${dissolved ? 'opacity-100' : 'opacity-0'}`}
+                style={{ transitionDelay: dissolved ? `${index * 70}ms` : '0ms' }}
+              >
+                {line.text}
+              </p>
+            ))}
+          </div>
         </div>
       </div>
     </div>
