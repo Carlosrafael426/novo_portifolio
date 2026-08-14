@@ -3,7 +3,12 @@ import { FaceGraphic } from '@/components/common/FaceGraphic';
 
 export function About() {
   return (
-    <Section id="sobre" eyebrow="02 / Identidade" title={<span className="sr-only">Quem sou eu</span>}>
+    <Section
+      id="sobre"
+      eyebrow="02 / Identidade"
+      title={<span className="sr-only">Quem sou eu</span>}
+      className="flex min-h-screen flex-col justify-center"
+    >
       <div className="flex flex-col items-center text-center">
         <p
           aria-hidden="true"
@@ -15,7 +20,7 @@ export function About() {
           </span>
         </p>
 
-        <FaceGraphic className="mt-8 w-[70%] min-w-65" />
+        <FaceGraphic className="mt-8 h-[55vh] max-h-160 sm:h-[65vh]" />
       </div>
     </Section>
   );

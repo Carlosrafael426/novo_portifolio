@@ -5,42 +5,52 @@ import { aboutContent } from '@/data/about';
 
 type Point = [number, number];
 
-// Silhueta de cabeça+pescoço+ombros de frente, traçada como UM polígono fechado contínuo (não
-// união de elipses) — dá um contorno nítido e reconhecível. Sentido horário a partir do topo do
-// crânio: desce pelo lado direito até o pescoço/ombro direito, atravessa a base, sobe pelo
-// ombro/pescoço esquerdo e fecha pelo lado esquerdo do crânio. Feições masculinas: mandíbula
-// larga, queixo quadrado, testa ampla.
+const CENTER_X = 150;
+
+// Perfil do lado direito da cabeça, do topo do crânio até a base do pescoço (y crescente = mais
+// pra baixo) — mandíbula larga, queixo definido, pescoço curto (só "do pescoço pra cima", sem
+// ombros). O lado esquerdo é gerado espelhando esses mesmos pontos, o que garante uma silhueta
+// simétrica e sem auto-interseção (o risco de um polígono desenhado ponto a ponto nos dois lados).
+// Estreita de forma monótona do zigomático até o pescoço — nunca alarga de novo depois do
+// queixo, senão o pescoço lê como um segundo blob "amarrado" embaixo da cabeça em vez de um
+// pescoço só.
+const RIGHT_PROFILE: Point[] = [
+  [194, 26], // crânio superior
+  [230, 54], // crânio, ponto mais largo (têmpora)
+  [233, 88], // logo abaixo da têmpora, altura da orelha
+  [226, 120], // bochecha superior
+  [218, 150], // zigomático — mais largo do rosto (mandíbula larga, masculina)
+  [204, 176], // ângulo da mandíbula
+  [186, 200], // mandíbula inferior
+  [168, 220], // queixo
+  [160, 240], // topo do pescoço, mais estreito que a mandíbula
+  [158, 305], // base do pescoço (corte da silhueta), quase reto
+];
+
 const FACE_POLY: Point[] = [
-  [150, 38], // topo do crânio
-  [185, 42], [212, 58], [228, 85], [236, 115], // lado direito do crânio
-  [234, 145], [228, 168], // zigomático direito
-  [222, 195], [210, 222], [192, 244], // mandíbula direita
-  [172, 258], // queixo, lado direito
-  [178, 275], [180, 292], // pescoço, lado direito
-  [205, 310], [245, 335], [280, 365], [280, 380], // ombro direito
-  [20, 380], [20, 365], [55, 335], [95, 310], // ombro esquerdo
-  [120, 292], [122, 275], // pescoço, lado esquerdo
-  [128, 258], // queixo, lado esquerdo
-  [108, 244], [90, 222], [78, 195], // mandíbula esquerda
-  [72, 168], [66, 145], // zigomático esquerdo
-  [64, 115], [72, 85], [88, 58], [115, 42], // lado esquerdo do crânio
+  [CENTER_X, 14],
+  ...RIGHT_PROFILE,
+  ...RIGHT_PROFILE.slice()
+    .reverse()
+    .map(([x, y]): Point => [2 * CENTER_X - x, y]),
 ];
 
 const EARS = [
-  { cx: 60, cy: 155, rx: 12, ry: 22 },
-  { cx: 240, cy: 155, rx: 12, ry: 22 },
+  { cx: CENTER_X - 95, cy: 104, rx: 13, ry: 24 },
+  { cx: CENTER_X + 95, cy: 104, rx: 13, ry: 24 },
 ];
 
 const EXCLUDE = [
-  { cx: 118, cy: 130, r: 12 }, // olho esquerdo
-  { cx: 182, cy: 130, r: 12 }, // olho direito
-  { cx: 138, cy: 203, r: 7 }, // boca, esquerda
-  { cx: 150, cy: 205, r: 7 }, // boca, centro
-  { cx: 162, cy: 203, r: 7 }, // boca, direita
+  { cx: CENTER_X - 40, cy: 135, r: 13 }, // olho esquerdo
+  { cx: CENTER_X + 40, cy: 135, r: 13 }, // olho direito
+  { cx: CENTER_X - 13, cy: 190, r: 7 }, // boca, esquerda
+  { cx: CENTER_X + 13, cy: 190, r: 7 }, // boca, direita
 ];
 
 const VIEW_WIDTH = 300;
-const VIEW_HEIGHT = 380;
+const VIEW_HEIGHT = 320;
+const NODE_COUNT = 260;
+const NODE_EDGE_BIAS = 0.55;
 const NEIGHBORS_PER_NODE = 2;
 const MAX_CONNECT_DISTANCE = 26;
 const INTERSECTION_DEGREE = 4;
@@ -109,7 +119,7 @@ function buildRegionNodes(
 
     const nearEdge = distToPolygonEdge(x, y, FACE_POLY) < 16;
     if (nearEdge || Math.random() < edgeBias) {
-      const r = Math.random() < 0.09 ? 1.8 + Math.random() * 0.9 : 0.7 + Math.random() * 0.7;
+      const r = Math.random() < 0.09 ? 0.9 + Math.random() * 0.45 : 0.7 + Math.random() * 0.7;
       nodes.push({ baseX: x, baseY: y, x, y, r });
     }
   }
@@ -117,12 +127,9 @@ function buildRegionNodes(
 }
 
 function buildNodes(): ConstellationNode[] {
-  // Orçamento de nós dividido explicitamente entre cabeça e corpo — amostragem uniforme sobre a
-  // silhueta inteira gasta boa parte do total na área grande dos ombros e deixa a cabeça (a parte
-  // que importa) rala.
-  const head = buildRegionNodes(230, 55, 245, 30, 265, 0.6);
-  const neckShoulders = buildRegionNodes(90, 15, 285, 258, 380, 0.45);
-  return [...head, ...neckShoulders];
+  // Só cabeça+pescoço agora (sem ombros) — uma única região cobre a silhueta inteira sem
+  // precisar dividir orçamento entre sub-áreas de tamanho muito diferente.
+  return buildRegionNodes(NODE_COUNT, 35, 265, 8, 310, NODE_EDGE_BIAS);
 }
 
 function buildConnections(nodes: ConstellationNode[]): Array<[number, number]> {
@@ -433,7 +440,7 @@ export function FaceGraphic({ className }: FaceGraphicProps) {
         ref={svgRef}
         viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
         aria-hidden="true"
-        className="h-auto w-full cursor-pointer"
+        className="h-full w-auto cursor-pointer"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
       >
@@ -475,7 +482,7 @@ export function FaceGraphic({ className }: FaceGraphicProps) {
               }}
               cx={node.x}
               cy={node.y}
-              r={intersectionNodes[i] ? node.r + 0.6 : node.r}
+              r={intersectionNodes[i] ? node.r + 0.3 : node.r}
               opacity={intersectionNodes[i] ? 0.65 : 0.3}
               filter={intersectionNodes[i] ? `url(#${filterId})` : undefined}
             />
