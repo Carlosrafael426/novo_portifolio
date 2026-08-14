@@ -22,9 +22,17 @@ interface FaceMeshData {
 const faceMesh = faceMeshJson as FaceMeshData;
 const ANATOMICAL_COUNT = faceMesh.bright.length;
 
-const FILL_NODE_SIZE = 0.028;
-const ANATOMICAL_NODE_SIZE = 0.045;
-const PARTICLE_SIZE = 0.045;
+const FILL_NODE_SIZE = 0.017;
+const ANATOMICAL_NODE_SIZE = 0.03;
+const PARTICLE_SIZE = 0.032;
+
+// Exagera o relevo da malha (que por natureza é raso, 0..0.62) — sem isso, o rosto lê como uma
+// imagem achatada com relevo sutil em vez de algo genuinamente tridimensional.
+const Z_DEPTH_SCALE = 1.9;
+
+// O canvas agora cobre a seção inteira (não só uma caixinha), então o grupo precisa descer no
+// espaço local pra não brigar com o título no topo da seção.
+const GROUP_Y_OFFSET = -0.55;
 
 // Opacidade em função de Z (saliência), não mais de "frontness" — a malha é uma calota frontal
 // com relevo, não uma cabeça fechada, então não existe mais um lado "de trás" pra apagar. Nariz,
@@ -39,14 +47,17 @@ const FILL_ALPHA_Z_BOOST = 0.12;
 const DISSOLVED_ALPHA_FACTOR = 0.45;
 
 const IDLE_JITTER = 0.01;
-// Amplitude do movimento lento dos estilhaços enquanto o texto está visível — bem maior e mais
-// lento que o jitter ambiente do rosto montado, pra ler como destroços flutuando, não como ruído.
-const DRIFT_AMPLITUDE = 0.07;
+// Amplitude e velocidade do movimento lento dos estilhaços enquanto o texto está visível — bem
+// maior e mais lento que o jitter ambiente do rosto montado, pra ler como uma constelação de
+// estrelas flutuando devagar pela seção inteira, não como ruído.
+const DRIFT_AMPLITUDE = 0.18;
+const DRIFT_FREQ_X = 0.09;
+const DRIFT_FREQ_Y = 0.07;
+const DRIFT_FREQ_Z = 0.06;
 
-// Rotação do rosto acompanhando o mouse (só desktop com ponteiro fino). Contida de propósito: a
-// malha é uma casca frontal sem volume atrás, então virar demais expõe que não há nuca.
-const MAX_ROTATE_Y = 18;
-const MAX_ROTATE_X = 8;
+// Rotação do rosto acompanhando o mouse (só desktop com ponteiro fino).
+const MAX_ROTATE_Y = 26;
+const MAX_ROTATE_X = 12;
 const ROTATE_RANGE_PX = 420;
 const ROTATE_DAMPING = 0.06;
 
@@ -54,8 +65,10 @@ const EXPLODE_NODE_DURATION = 0.7;
 const EXPLODE_NODE_MAX_DELAY = 0.25;
 const EXPLODE_TOTAL = EXPLODE_NODE_DURATION + EXPLODE_NODE_MAX_DELAY;
 const EXPLODE_LINES_DURATION = 0.35;
-const EXPLODE_PUSH_MIN = 0.55;
-const EXPLODE_PUSH_MAX = 1.05;
+// Bem maior que o rosto em si — os fragmentos precisam se espalhar pela seção inteira, não só
+// pela caixinha onde o rosto vivia.
+const EXPLODE_PUSH_MIN = 0.7;
+const EXPLODE_PUSH_MAX = 1.9;
 
 const REFORM_NODE_DURATION = 0.8;
 const REFORM_NODE_MAX_DELAY = 0.2;
@@ -124,7 +137,7 @@ function buildMeshNodeSet(coarse: boolean) {
     remap[i] = nodes.length;
     const x = faceMesh.nodes[i * 3];
     const y = faceMesh.nodes[i * 3 + 1];
-    const z = faceMesh.nodes[i * 3 + 2];
+    const z = faceMesh.nodes[i * 3 + 2] * Z_DEPTH_SCALE;
     if (z > zMax) zMax = z;
     nodes.push(makeNode(x, y, z));
   }
@@ -362,9 +375,9 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
 
         nodes.forEach((node, i) => {
           const target = targets[i];
-          node.x = target.x + Math.sin(elapsed * 0.15 + i) * DRIFT_AMPLITUDE;
-          node.y = target.y + Math.cos(elapsed * 0.12 + i * 1.3) * DRIFT_AMPLITUDE;
-          node.z = target.z + Math.sin(elapsed * 0.1 + i * 0.7) * DRIFT_AMPLITUDE;
+          node.x = target.x + Math.sin(elapsed * DRIFT_FREQ_X + i) * DRIFT_AMPLITUDE;
+          node.y = target.y + Math.cos(elapsed * DRIFT_FREQ_Y + i * 1.3) * DRIFT_AMPLITUDE;
+          node.z = target.z + Math.sin(elapsed * DRIFT_FREQ_Z + i * 0.7) * DRIFT_AMPLITUDE;
         });
 
         fillIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, false));
@@ -556,7 +569,7 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
   }, []);
 
   return (
-    <group ref={groupRef}>
+    <group ref={groupRef} position={[0, GROUP_Y_OFFSET, 0]}>
       <points>
         <bufferGeometry ref={fillGeometryRef}>
           <bufferAttribute attach="attributes-position" args={[buffers.fillPositions, 3]} />
@@ -643,13 +656,14 @@ interface FaceGraphicProps {
 
 /**
  * Rosto humano em 3D (Three.js/R3F), constelação sobre uma malha fixa (938 nós, 3.259 arestas)
- * extraída da referência visual — não mais gerada por parâmetros. Os 491 nós anatômicos (olhos,
- * nariz, lábios, sobrancelhas, mandíbula, orelhas, silhueta) brilham mais que o preenchimento da
- * malha. Acompanha o mouse virando de verdade em 3D, contido a ±18°/±8° (a malha é uma casca
- * frontal, não tem volume atrás). Um clique — ou Enter/Espaço no controle focável — dispara a
- * explosão e revela o texto "sobre mim"; os estilhaços continuam visíveis e à deriva atrás do
- * texto, não somem. Clicar no texto ou no botão "voltar" reconstrói o rosto. Nunca toca o cursor
- * nativo, só o próprio desenho.
+ * extraída da referência visual, com profundidade Z exagerada pra ler como volume de verdade.
+ * Os 491 nós anatômicos (olhos, nariz, lábios, sobrancelhas, mandíbula, orelhas, silhueta)
+ * brilham mais que o preenchimento da malha. Acompanha o mouse virando em 3D. Um clique — ou
+ * Enter/Espaço no controle focável — dispara a explosão: os nós se espalham pela seção inteira
+ * como uma constelação de estrelas à deriva lenta (não somem, só recuam de opacidade) e o texto
+ * "sobre mim" aparece na própria seção — não como modal, sem scroll da página enquanto visível.
+ * Clicar no texto ou no botão "voltar" reconstrói o rosto. Nunca toca o cursor nativo, só o
+ * próprio desenho.
  */
 export function FaceGraphic({ className }: FaceGraphicProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -668,8 +682,23 @@ export function FaceGraphic({ className }: FaceGraphicProps) {
   const isVisible = useIsVisible(wrapperRef);
   const frameloop = !isVisible ? 'never' : reducedMotion ? 'demand' : 'always';
 
+  // Trava o scroll da página enquanto o texto está visível — ele agora vive na própria seção, não
+  // num modal separado, então sem isso o usuário rolaria a página "por baixo" do texto revelado.
+  useEffect(() => {
+    if (!dissolved) return;
+    const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
+    const previousOverflow = document.body.style.overflow;
+    const previousPaddingRight = document.body.style.paddingRight;
+    document.body.style.overflow = 'hidden';
+    if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.paddingRight = previousPaddingRight;
+    };
+  }, [dissolved]);
+
   return (
-    <div ref={wrapperRef} className={className} style={{ position: 'relative' }}>
+    <div ref={wrapperRef} className={className}>
       <button
         type="button"
         onClick={() => controlsRef.current.explode()}
@@ -680,7 +709,7 @@ export function FaceGraphic({ className }: FaceGraphicProps) {
       >
         <div aria-hidden="true" className="h-full w-full">
           <Canvas
-            camera={{ position: [0, 0, 2.85], fov: 42 }}
+            camera={{ position: [0, 0, 6], fov: 45 }}
             dpr={[1, 2]}
             gl={{ antialias: true, alpha: true }}
             frameloop={frameloop}
@@ -698,12 +727,13 @@ export function FaceGraphic({ className }: FaceGraphicProps) {
         </div>
       </button>
 
-      {/* fixed (não absolute dentro do próprio gráfico) pra aparecer no meio da tela — clicável
-          quando visível pra reconstruir o rosto. Sem scrim de tela cheia: os estilhaços continuam
-          visíveis e à deriva atrás do texto, só a coluna de texto ganha um véu localizado. */}
+      {/* absolute dentro da própria seção (não fixed/tela cheia) — o texto aparece na página, no
+          lugar onde o rosto estava, não como um modal flutuando por cima de tudo. Sem scrim de
+          tela cheia: os estilhaços continuam visíveis e à deriva atrás do texto, só a coluna de
+          texto ganha um véu localizado. */}
       <div
         onClick={() => controlsRef.current.reform()}
-        className={`fixed inset-0 z-(--z-mobile-menu) flex items-center justify-center p-4 transition-opacity duration-500 sm:p-8 ${dissolved ? 'pointer-events-auto cursor-pointer opacity-100' : 'pointer-events-none opacity-0'}`}
+        className={`absolute inset-0 z-10 flex items-center justify-center p-4 transition-opacity duration-500 sm:p-8 ${dissolved ? 'pointer-events-auto cursor-pointer opacity-100' : 'pointer-events-none opacity-0'}`}
       >
         <div className="relative max-h-[80vh] max-w-lg overflow-y-auto">
           {/* Véu localizado, só atrás do bloco de texto — cantos arredondados generosos em vez de

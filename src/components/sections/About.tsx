@@ -7,21 +7,18 @@ export function About() {
       id="sobre"
       eyebrow="02 / Identidade"
       title={<span className="sr-only">Quem sou eu</span>}
-      className="flex min-h-screen flex-col justify-center"
+      className="min-h-screen"
+      background={<FaceGraphicSlot className="absolute inset-0" />}
     >
-      <div className="flex flex-col items-center text-center">
-        <p
-          aria-hidden="true"
-          className="font-display text-2xl leading-none font-normal whitespace-nowrap uppercase sm:text-3xl"
-        >
-          Quem sou{' '}
-          <span className="text-accent">
-            eu<span className="animate-cursor-blink">_</span>
-          </span>
-        </p>
-
-        <FaceGraphicSlot className="mt-8 aspect-4/5 h-[55vh] max-h-160 sm:h-[65vh]" />
-      </div>
+      <p
+        aria-hidden="true"
+        className="font-display text-center text-2xl leading-none font-normal whitespace-nowrap uppercase sm:text-3xl"
+      >
+        Quem sou{' '}
+        <span className="text-accent">
+          eu<span className="animate-cursor-blink">_</span>
+        </span>
+      </p>
     </Section>
   );
 }
