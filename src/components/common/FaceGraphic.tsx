@@ -34,6 +34,15 @@ const Z_DEPTH_SCALE = 1.9;
 // espaço local pra não brigar com o título no topo da seção.
 const GROUP_Y_OFFSET = -0.55;
 
+// Escala geral do rosto — cresce em volta do próprio centro (a posição do grupo, acima, não é
+// afetada pela escala), então isso não briga com o enquadramento já calibrado.
+const FACE_SCALE = 1.3;
+
+// Reduz a quantidade total de pontos (só no preenchimento — os 491 anatômicos continuam sempre
+// intactos, senão o rosto perde legibilidade). No mobile corta ainda mais, por performance.
+const POINT_COUNT_REDUCTION = 0.2;
+const MOBILE_EXTRA_FILL_REDUCTION = 0.5;
+
 // Opacidade em função de Z (saliência), não mais de "frontness" — a malha é uma calota frontal
 // com relevo, não uma cabeça fechada, então não existe mais um lado "de trás" pra apagar. Nariz,
 // testa e maçãs (mais salientes) acendem um pouco mais que o resto do mesmo grupo.
@@ -117,16 +126,29 @@ function mixToWhite(amount: number): THREE.Color {
 }
 
 /**
- * Monta os nós/arestas a partir da malha fixa. No mobile (ponteiro grosso), mantém os 491 nós
- * anatômicos sempre e descarta metade do preenchimento (e as arestas que dependiam só dele) —
- * os índices anatômicos não mudam de posição no remapeamento porque são sempre os primeiros a
- * entrar, então continuam ocupando 0..490 depois do filtro.
+ * Monta os nós/arestas a partir da malha fixa. Os 491 nós anatômicos continuam sempre presentes
+ * (índices não mudam de posição no remapeamento, porque são sempre os primeiros a entrar) — só o
+ * preenchimento é reduzido: um pouco pra todo mundo (POINT_COUNT_REDUCTION) e mais ainda no
+ * mobile, por performance. Distribuição uniforme (tipo Bresenham) em vez de um stride fixo, pra
+ * não ralar mais uma região específica do que outra dependendo da ordem dos vértices na malha.
  */
 function buildMeshNodeSet(coarse: boolean) {
   const totalNodes = faceMesh.nodes.length / 3;
+  const fillCount = totalNodes - ANATOMICAL_COUNT;
+  const targetFillCount = Math.round(totalNodes * (1 - POINT_COUNT_REDUCTION)) - ANATOMICAL_COUNT;
+  const fillKeepFraction =
+    Math.max(0, Math.min(1, targetFillCount / fillCount)) * (coarse ? MOBILE_EXTRA_FILL_REDUCTION : 1);
+
   const keep = new Uint8Array(totalNodes);
+  let fillLocalIndex = 0;
   for (let i = 0; i < totalNodes; i++) {
-    keep[i] = i < ANATOMICAL_COUNT || !coarse || i % 2 === 0 ? 1 : 0;
+    if (i < ANATOMICAL_COUNT) {
+      keep[i] = 1;
+      continue;
+    }
+    fillLocalIndex += 1;
+    const keepThis = Math.floor(fillLocalIndex * fillKeepFraction) !== Math.floor((fillLocalIndex - 1) * fillKeepFraction);
+    keep[i] = keepThis ? 1 : 0;
   }
 
   const remap = new Int32Array(totalNodes).fill(-1);
@@ -569,7 +591,7 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
   }, []);
 
   return (
-    <group ref={groupRef} position={[0, GROUP_Y_OFFSET, 0]}>
+    <group ref={groupRef} position={[0, GROUP_Y_OFFSET, 0]} scale={FACE_SCALE}>
       <points>
         <bufferGeometry ref={fillGeometryRef}>
           <bufferAttribute attach="attributes-position" args={[buffers.fillPositions, 3]} />
