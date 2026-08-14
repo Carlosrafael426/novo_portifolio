@@ -40,7 +40,7 @@ export default tseslint.config(
     // ciclo de render do React — exatamente pra isso que esse padrão existe. As regras
     // react-hooks/refs, /purity e /immutability são voltadas ao React Compiler (DOM) e ainda
     // não reconhecem esse padrão.
-    files: ['src/components/common/HeroCanvas.tsx', 'src/components/common/BrainGraphic.tsx'],
+    files: ['src/components/common/HeroCanvas.tsx', 'src/components/common/FaceGraphic.tsx'],
     rules: {
       'react-hooks/refs': 'off',
       'react-hooks/purity': 'off',

@@ -1,81 +1,128 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
 import { gsap } from 'gsap';
 import { connectComponents, type ConstellationNode } from '@/utils/constellation';
 import { aboutContent } from '@/data/about';
 
-interface Ellipse {
-  cx: number;
-  cy: number;
-  rx: number;
-  ry: number;
-}
+type Point = [number, number];
 
-// Lobos aproximados por elipses bem sobrepostas — lê como uma massa só com bojos nos lugares
-// certos (frontal/parietal alongado, temporal pendurado, occipital+cerebelo atrás), sem precisar
-// de um path desenhado à mão. Não é anatomicamente exato, mas é reconhecível como cérebro.
-const LOBES: Ellipse[] = [
-  { cx: 205, cy: 108, rx: 150, ry: 72 }, // frontal + parietal, bem alongada
-  { cx: 335, cy: 128, rx: 68, ry: 62 }, // occipital (trás)
-  { cx: 78, cy: 122, rx: 58, ry: 58 }, // arredondamento frontal (frente)
-  { cx: 112, cy: 205, rx: 78, ry: 54 }, // temporal (pendurado embaixo/frente)
-  { cx: 308, cy: 222, rx: 55, ry: 42 }, // cerebelo (trás/embaixo)
+// Silhueta de cabeça+pescoço+ombros de frente, traçada como UM polígono fechado contínuo (não
+// união de elipses) — dá um contorno nítido e reconhecível. Sentido horário a partir do topo do
+// crânio: desce pelo lado direito até o pescoço/ombro direito, atravessa a base, sobe pelo
+// ombro/pescoço esquerdo e fecha pelo lado esquerdo do crânio. Feições masculinas: mandíbula
+// larga, queixo quadrado, testa ampla.
+const FACE_POLY: Point[] = [
+  [150, 38], // topo do crânio
+  [185, 42], [212, 58], [228, 85], [236, 115], // lado direito do crânio
+  [234, 145], [228, 168], // zigomático direito
+  [222, 195], [210, 222], [192, 244], // mandíbula direita
+  [172, 258], // queixo, lado direito
+  [178, 275], [180, 292], // pescoço, lado direito
+  [205, 310], [245, 335], [280, 365], [280, 380], // ombro direito
+  [20, 380], [20, 365], [55, 335], [95, 310], // ombro esquerdo
+  [120, 292], [122, 275], // pescoço, lado esquerdo
+  [128, 258], // queixo, lado esquerdo
+  [108, 244], [90, 222], [78, 195], // mandíbula esquerda
+  [72, 168], [66, 145], // zigomático esquerdo
+  [64, 115], [72, 85], [88, 58], [115, 42], // lado esquerdo do crânio
 ];
 
-// Notch curto — só sugere a fissura lateral, não desconecta nada.
-const NOTCH: Array<{ cx: number; cy: number; r: number }> = [
-  { cx: 150, cy: 168, r: 11 },
-  { cx: 175, cy: 172, r: 10 },
-  { cx: 198, cy: 173, r: 9 },
+const EARS = [
+  { cx: 60, cy: 155, rx: 12, ry: 22 },
+  { cx: 240, cy: 155, rx: 12, ry: 22 },
 ];
 
-const BRAINSTEM: Array<{ x: number; y: number }> = [
-  { x: 250, y: 258 },
-  { x: 258, y: 278 },
-  { x: 267, y: 298 },
-  { x: 278, y: 318 },
+const EXCLUDE = [
+  { cx: 118, cy: 130, r: 12 }, // olho esquerdo
+  { cx: 182, cy: 130, r: 12 }, // olho direito
+  { cx: 138, cy: 203, r: 7 }, // boca, esquerda
+  { cx: 150, cy: 205, r: 7 }, // boca, centro
+  { cx: 162, cy: 203, r: 7 }, // boca, direita
 ];
 
-const VIEW_WIDTH = 440;
-const VIEW_HEIGHT = 340;
-const NODE_COUNT = 175;
+const VIEW_WIDTH = 300;
+const VIEW_HEIGHT = 380;
 const NEIGHBORS_PER_NODE = 2;
-const MAX_CONNECT_DISTANCE = 42;
+const MAX_CONNECT_DISTANCE = 26;
 const INTERSECTION_DEGREE = 4;
-const PARTICLE_COUNT = 20;
+const PARTICLE_COUNT = 22;
 const PARTICLE_SPEED_MIN = 0.09;
 const PARTICLE_SPEED_MAX = 0.22;
 
-function insideAnyLobe(x: number, y: number): boolean {
-  return LOBES.some((l) => ((x - l.cx) / l.rx) ** 2 + ((y - l.cy) / l.ry) ** 2 < 1);
-}
-function insideNotch(x: number, y: number): boolean {
-  return NOTCH.some((c) => Math.hypot(x - c.cx, y - c.cy) < c.r);
+// Rotação da cabeça acompanhando o mouse (só desktop com ponteiro fino).
+const MAX_ROTATE_Y = 18;
+const MAX_ROTATE_X = 8;
+const ROTATE_RANGE_PX = 420;
+const ROTATE_DAMPING = 0.06;
+
+function pointInPolygon(x: number, y: number, poly: Point[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
 }
 
-function buildNodes(): ConstellationNode[] {
-  const minX = Math.min(...LOBES.map((l) => l.cx - l.rx));
-  const maxX = Math.max(...LOBES.map((l) => l.cx + l.rx));
-  const minY = Math.min(...LOBES.map((l) => l.cy - l.ry));
-  const maxY = Math.max(...LOBES.map((l) => l.cy + l.ry));
+function distToPolygonEdge(x: number, y: number, poly: Point[]): number {
+  let best = Infinity;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [x1, y1] = poly[j];
+    const [x2, y2] = poly[i];
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len2 = dx * dx + dy * dy || 1;
+    let t = ((x - x1) * dx + (y - y1) * dy) / len2;
+    t = Math.max(0, Math.min(1, t));
+    const px = x1 + t * dx;
+    const py = y1 + t * dy;
+    const d = Math.hypot(x - px, y - py);
+    if (d < best) best = d;
+  }
+  return best;
+}
 
+function insideEars(x: number, y: number): boolean {
+  return EARS.some((e) => ((x - e.cx) / e.rx) ** 2 + ((y - e.cy) / e.ry) ** 2 < 1);
+}
+function insideExclude(x: number, y: number): boolean {
+  return EXCLUDE.some((c) => Math.hypot(x - c.cx, y - c.cy) < c.r);
+}
+
+function buildRegionNodes(
+  count: number,
+  minX: number,
+  maxX: number,
+  minY: number,
+  maxY: number,
+  edgeBias: number,
+): ConstellationNode[] {
   const nodes: ConstellationNode[] = [];
   let attempts = 0;
-  while (nodes.length < NODE_COUNT && attempts < NODE_COUNT * 50) {
+  while (nodes.length < count && attempts < count * 80) {
     attempts += 1;
     const x = minX + Math.random() * (maxX - minX);
     const y = minY + Math.random() * (maxY - minY);
-    if (!insideAnyLobe(x, y) || insideNotch(x, y)) continue;
-    const r = Math.random() < 0.09 ? 1.8 + Math.random() * 0.9 : 0.7 + Math.random() * 0.7;
-    nodes.push({ baseX: x, baseY: y, x, y, r });
-  }
+    const inside = pointInPolygon(x, y, FACE_POLY) || insideEars(x, y);
+    if (!inside || insideExclude(x, y)) continue;
 
-  for (const point of BRAINSTEM) {
-    const x = point.x + (Math.random() - 0.5) * 6;
-    nodes.push({ baseX: x, baseY: point.y, x, y: point.y, r: 0.9 + Math.random() * 0.5 });
+    const nearEdge = distToPolygonEdge(x, y, FACE_POLY) < 16;
+    if (nearEdge || Math.random() < edgeBias) {
+      const r = Math.random() < 0.09 ? 1.8 + Math.random() * 0.9 : 0.7 + Math.random() * 0.7;
+      nodes.push({ baseX: x, baseY: y, x, y, r });
+    }
   }
-
   return nodes;
+}
+
+function buildNodes(): ConstellationNode[] {
+  // Orçamento de nós dividido explicitamente entre cabeça e corpo — amostragem uniforme sobre a
+  // silhueta inteira gasta boa parte do total na área grande dos ombros e deixa a cabeça (a parte
+  // que importa) rala.
+  const head = buildRegionNodes(230, 55, 245, 30, 265, 0.6);
+  const neckShoulders = buildRegionNodes(90, 15, 285, 258, 380, 0.45);
+  return [...head, ...neckShoulders];
 }
 
 function buildConnections(nodes: ConstellationNode[]): Array<[number, number]> {
@@ -100,19 +147,6 @@ function buildConnections(nodes: ConstellationNode[]): Array<[number, number]> {
     }
   });
 
-  const stemStart = nodes.length - BRAINSTEM.length;
-  for (let i = stemStart; i < nodes.length - 1; i++) pairs.push([i, i + 1]);
-  let nearestIdx = 0;
-  let nearestDist = Infinity;
-  for (let i = 0; i < stemStart; i++) {
-    const d = Math.hypot(nodes[i].baseX - nodes[stemStart].baseX, nodes[i].baseY - nodes[stemStart].baseY);
-    if (d < nearestDist) {
-      nearestDist = d;
-      nearestIdx = i;
-    }
-  }
-  pairs.push([nearestIdx, stemStart]);
-
   return connectComponents(nodes, pairs);
 }
 
@@ -130,7 +164,7 @@ function buildParticles(connectionCount: number): Particle[] {
   }));
 }
 
-function buildBrain() {
+function buildFace() {
   const nodes = buildNodes();
   const connections = buildConnections(nodes);
 
@@ -153,87 +187,41 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
-// Realce de sintaxe minimalista, só com os tons que o site já usa (accent/foreground/muted) —
-// sem paleta nova. As chaves do objeto espelham a interface AboutContent de verdade
-// (src/types/about.ts), não são inventadas.
-const KEYWORD = 'text-accent';
-const TYPE_NAME = 'text-foreground/50';
-const PROPERTY = 'text-foreground/70';
-const STRING = 'text-foreground';
-const PUNCT = 'text-muted';
-const COMMENT = 'text-muted italic';
-
-function kw(text: string) {
-  return <span className={KEYWORD}>{text}</span>;
-}
-function type(text: string) {
-  return <span className={TYPE_NAME}>{text}</span>;
-}
-function prop(text: string) {
-  return <span className={PROPERTY}>{text}</span>;
-}
-function str(text: string) {
-  return (
-    <span className={STRING}>
-      <span className={PUNCT}>"</span>
-      {text}
-      <span className={PUNCT}>"</span>
-    </span>
-  );
-}
-function punct(text: string) {
-  return <span className={PUNCT}>{text}</span>;
-}
-
 interface CodeLine {
-  content: ReactNode;
-}
-
-function stringArrayLines(items: string[]): CodeLine[] {
-  return items.map((item) => ({ content: <>{'    '}{str(item)}{punct(',')}</> }));
+  text: string;
+  className: string;
 }
 
 const CODE_LINES: CodeLine[] = [
-  { content: <span className={COMMENT}>{'// sobre-mim.ts'}</span> },
-  { content: <>{' '}</> },
-  { content: <>{kw('interface')}{' '}{type('AboutContent')}{' '}{punct('{')}</> },
-  { content: <>{'  '}{prop('bio')}{punct(': ')}{type('string[]')}{punct(';')}</> },
-  { content: <>{'  '}{prop('philosophy')}{punct(': ')}{type('string')}{punct(';')}</> },
-  { content: <>{'  '}{prop('lookingFor')}{punct(': ')}{type('string[]')}{punct(';')}</> },
-  { content: <>{punct('}')}</> },
-  { content: <>{' '}</> },
-  { content: <>{kw('const')}{' carlos: '}{type('AboutContent')}{' '}{punct('= {')}</> },
-  { content: <>{'  '}{prop('bio')}{punct(': [')}</> },
-  ...stringArrayLines(aboutContent.bio),
-  { content: <>{'  '}{punct('],')}</> },
-  { content: <>{'  '}{prop('philosophy')}{punct(':')}</> },
-  { content: <>{'    '}{str(aboutContent.philosophy)}{punct(',')}</> },
-  { content: <>{'  '}{prop('lookingFor')}{punct(': [')}</> },
-  ...stringArrayLines(aboutContent.lookingFor),
-  { content: <>{'  '}{punct('],')}</> },
-  { content: <>{punct('};')}</> },
-  { content: <>{' '}</> },
-  { content: <>{kw('export')}{' '}{kw('default')}{' carlos;'}</> },
+  { text: '// sobre-mim.ts', className: 'text-accent' },
+  ...aboutContent.bio.map((paragraph) => ({ text: `// ${paragraph}`, className: 'text-foreground/90 mt-2' })),
+  { text: '/**', className: 'text-accent mt-3' },
+  { text: ` * ${aboutContent.philosophy}`, className: 'text-foreground/90 italic' },
+  { text: ' */', className: 'text-accent' },
+  ...aboutContent.lookingFor.map((item) => ({ text: `// - ${item}`, className: 'text-muted mt-1' })),
 ];
 
-interface BrainGraphicProps {
+interface FaceGraphicProps {
   className?: string;
 }
 
 /**
- * Constelação em formato de cérebro. Partículas viajam pelas conexões e as interseções (nós com
- * mais de uma linha) brilham. Ao passar o mouse (ou tocar, em telas touch) os nós se desfazem
- * coordenadamente pra fora e dão lugar a um bloco de "código" com o texto sobre mim — solta ao
- * afastar o mouse / tocar de novo. Nunca toca o cursor nativo, só o próprio desenho.
+ * Constelação em formato de rosto (de frente, feições masculinas). Partículas viajam pelas
+ * conexões; interseções (nós com várias linhas) brilham. O rosto acompanha o mouse virando a
+ * cabeça (rotação 3D via CSS, só ponteiro fino) — olha pra tela em repouso. Um clique dispara a
+ * explosão coordenada dos nós e revela o texto "sobre mim"; clicar no texto reconstrói o rosto.
+ * Nunca toca o cursor nativo, só o próprio desenho.
  */
-export function BrainGraphic({ className }: BrainGraphicProps) {
+export function FaceGraphic({ className }: FaceGraphicProps) {
   const filterId = useId();
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const [dissolved, setDissolved] = useState(false);
 
-  const dataRef = useRef<ReturnType<typeof buildBrain> | null>(null);
+  const dataRef = useRef<ReturnType<typeof buildFace> | null>(null);
   if (dataRef.current === null) {
-    dataRef.current = buildBrain();
+    dataRef.current = buildFace();
   }
   const { nodes, connections, intersectionNodes, particles } = dataRef.current;
 
@@ -241,10 +229,12 @@ export function BrainGraphic({ className }: BrainGraphicProps) {
   const lineRefs = useRef<Array<SVGLineElement | null>>([]);
   const particleRefs = useRef<Array<SVGCircleElement | null>>([]);
   const modeRef = useRef<'idle' | 'dissolved' | 'transitioning'>('idle');
+  const reformRef = useRef<() => void>(() => {});
 
   useEffect(() => {
+    const wrapper = wrapperRef.current;
     const svg = svgRef.current;
-    if (!svg) return;
+    if (!wrapper || !svg) return;
 
     const reducedMotion = prefersReducedMotion();
     const fine = isFinePointer();
@@ -254,6 +244,18 @@ export function BrainGraphic({ className }: BrainGraphicProps) {
       isVisible = entry.isIntersecting;
     }, { threshold: 0 });
     observer.observe(svg);
+
+    const pointer = { x: 0, y: 0, active: false };
+    function handleWindowPointerMove(event: PointerEvent) {
+      pointer.x = event.clientX;
+      pointer.y = event.clientY;
+      pointer.active = true;
+    }
+    if (fine && !reducedMotion) {
+      window.addEventListener('pointermove', handleWindowPointerMove);
+    }
+
+    const rotation = { x: 0, y: 0 };
 
     let frame: number | undefined;
     let lastTimestamp: number | undefined;
@@ -299,6 +301,25 @@ export function BrainGraphic({ className }: BrainGraphicProps) {
               dot.setAttribute('cy', py.toFixed(2));
             }
           });
+
+          // Cabeça acompanha o mouse — olha pra tela (rotação 0) enquanto não houver posição
+          // real do ponteiro ainda.
+          if (fine) {
+            let targetY = 0;
+            let targetX = 0;
+            if (pointer.active) {
+              const rect = wrapper.getBoundingClientRect();
+              const centerX = rect.left + rect.width / 2;
+              const centerY = rect.top + rect.height / 2;
+              const dx = pointer.x - centerX;
+              const dy = pointer.y - centerY;
+              targetY = Math.max(-1, Math.min(1, dx / ROTATE_RANGE_PX)) * MAX_ROTATE_Y;
+              targetX = Math.max(-1, Math.min(1, -dy / ROTATE_RANGE_PX)) * MAX_ROTATE_X;
+            }
+            rotation.y += (targetY - rotation.y) * ROTATE_DAMPING;
+            rotation.x += (targetX - rotation.x) * ROTATE_DAMPING;
+            wrapper.style.transform = `perspective(1000px) rotateY(${rotation.y.toFixed(2)}deg) rotateX(${rotation.x.toFixed(2)}deg)`;
+          }
         }
         frame = requestAnimationFrame(tick);
       };
@@ -306,8 +327,9 @@ export function BrainGraphic({ className }: BrainGraphicProps) {
     }
 
     const ctx = gsap.context(() => {
-      // Máquina de estado simples: 'idle' (cérebro normal, loop rodando) -> 'transitioning'
+      // Máquina de estado simples: 'idle' (rosto normal, loop rodando) -> 'transitioning'
       // (GSAP no controle) -> 'dissolved' (código visível, parado) -> 'transitioning' -> 'idle'.
+      // Animação de explosão/reconstrução intocada — só o gatilho (clique) mudou.
       function explode() {
         if (modeRef.current !== 'idle') return;
         modeRef.current = 'transitioning';
@@ -381,36 +403,24 @@ export function BrainGraphic({ className }: BrainGraphicProps) {
         });
       }
 
-      function handleEnter() {
-        explode();
-      }
-      function handleLeave() {
-        reform();
-      }
-      // Toque/clique alternam o estado — funciona em qualquer dispositivo, é o único jeito de
-      // acionar o efeito em telas touch (sem hover).
+      reformRef.current = reform;
+
       function handleClick() {
         if (modeRef.current === 'idle') explode();
-        else if (modeRef.current === 'dissolved') reform();
       }
 
-      if (fine) {
-        svg.addEventListener('pointerenter', handleEnter);
-        svg.addEventListener('pointerleave', handleLeave);
-      }
       svg.addEventListener('click', handleClick);
 
       return () => {
-        if (fine) {
-          svg.removeEventListener('pointerenter', handleEnter);
-          svg.removeEventListener('pointerleave', handleLeave);
-        }
         svg.removeEventListener('click', handleClick);
       };
     }, svg);
 
     return () => {
-      observer?.disconnect();
+      observer.disconnect();
+      if (fine && !reducedMotion) {
+        window.removeEventListener('pointermove', handleWindowPointerMove);
+      }
       if (frame !== undefined) cancelAnimationFrame(frame);
       ctx.revert();
     };
@@ -418,12 +428,12 @@ export function BrainGraphic({ className }: BrainGraphicProps) {
   }, []);
 
   return (
-    <div className={className} style={{ position: 'relative' }}>
+    <div ref={wrapperRef} className={className} style={{ position: 'relative' }}>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
         aria-hidden="true"
-        className="h-auto w-full"
+        className="h-auto w-full cursor-pointer"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
       >
@@ -437,9 +447,8 @@ export function BrainGraphic({ className }: BrainGraphicProps) {
           </filter>
         </defs>
 
-        {/* Área de detecção do ponteiro cobrindo o viewBox inteiro — sem isso, pointerenter/leave
-            só disparam em cima das formas pintadas (linhas/pontos finos), não do espaço vazio
-            entre elas. */}
+        {/* Área de detecção do clique cobrindo o viewBox inteiro — sem isso, só formas pintadas
+            (linhas/pontos finos) registrariam o clique, não o espaço vazio entre elas. */}
         <rect x="0" y="0" width={VIEW_WIDTH} height={VIEW_HEIGHT} fill="transparent" />
 
         <g stroke="#c6ff45" strokeWidth="0.5" opacity="0.16">
@@ -494,24 +503,22 @@ export function BrainGraphic({ className }: BrainGraphicProps) {
         </g>
       </svg>
 
-      {/* fixed (não absolute dentro do próprio gráfico) pra aparecer "no meio da tela" de
-          verdade — com o conteúdo todo, a caixa do cérebro é pequena demais e o texto
-          transbordava por cima do título em telas estreitas. */}
+      {/* fixed (não absolute dentro do próprio gráfico) pra aparecer no meio da tela — clicável
+          quando visível pra reconstruir o rosto. */}
       <div
-        className={`pointer-events-none fixed inset-0 z-(--z-mobile-menu) flex items-center justify-center p-4 transition-opacity duration-500 sm:p-8 ${dissolved ? 'opacity-100' : 'opacity-0'}`}
+        ref={overlayRef}
+        onClick={() => reformRef.current()}
+        className={`fixed inset-0 z-(--z-mobile-menu) flex items-center justify-center p-4 transition-opacity duration-500 sm:p-8 ${dissolved ? 'pointer-events-auto cursor-pointer opacity-100' : 'pointer-events-none opacity-0'}`}
       >
-        <div
-          aria-hidden="true"
-          className="bg-background/85 pointer-events-none absolute inset-0"
-        />
-        <div className="relative max-h-[80vh] max-w-lg overflow-y-auto text-left font-mono text-[10px] whitespace-pre-wrap leading-relaxed sm:text-xs">
+        <div aria-hidden="true" className="bg-background/85 absolute inset-0" />
+        <div className="relative max-h-[80vh] max-w-lg overflow-y-auto text-left font-mono text-[10px] leading-relaxed sm:text-xs">
           {CODE_LINES.map((line, index) => (
             <p
               key={index}
-              className={`transition-opacity duration-400 ease-out ${dissolved ? 'opacity-100' : 'opacity-0'}`}
-              style={{ transitionDelay: dissolved ? `${index * 45}ms` : '0ms' }}
+              className={`${line.className} transition-opacity duration-400 ease-out ${dissolved ? 'opacity-100' : 'opacity-0'}`}
+              style={{ transitionDelay: dissolved ? `${index * 70}ms` : '0ms' }}
             >
-              {line.content}
+              {line.text}
             </p>
           ))}
         </div>
