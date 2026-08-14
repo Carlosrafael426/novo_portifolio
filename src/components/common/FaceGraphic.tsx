@@ -13,39 +13,47 @@ const WHITE_COLOR = new THREE.Color(WHITE_HEX);
 // os mesmos números validados na silhueta 2D anterior, só reescalados pra unidades de mundo 3D.
 // A cabeça é gerada girando esse perfil em torno do eixo Y (um "torno"), o que garante uma forma
 // arredondada e sem auto-interseção por construção — não depende de acertar um polígono à mão.
+// Recentralizado em Y (o corte do pescoço deslocou o meio geométrico da cabeça pra cima — sem
+// isso, a cabeça gira fora do próprio centro e fica baixa no enquadramento da câmera).
 const PROFILE: Array<{ y: number; r: number }> = [
-  { y: 1.36, r: 0 }, // topo do crânio
-  { y: 1.24, r: 0.44 },
-  { y: 0.96, r: 0.8 }, // têmpora, ponto mais largo do crânio
-  { y: 0.62, r: 0.83 },
-  { y: 0.3, r: 0.76 },
-  { y: 0.0, r: 0.68 }, // zigomático — mais largo do rosto
-  { y: -0.26, r: 0.54 }, // ângulo da mandíbula
-  { y: -0.5, r: 0.36 }, // queixo
-  { y: -0.7, r: 0.18 }, // topo do pescoço, mais estreito que a mandíbula
-  { y: -0.9, r: 0.1 },
-  { y: -1.55, r: 0.08 }, // base do pescoço (corte da silhueta)
+  { y: 0.98, r: 0 }, // topo do crânio
+  { y: 0.86, r: 0.44 },
+  { y: 0.58, r: 0.8 }, // têmpora, ponto mais largo do crânio
+  { y: 0.24, r: 0.83 },
+  { y: -0.08, r: 0.76 },
+  { y: -0.38, r: 0.68 }, // zigomático — mais largo do rosto
+  { y: -0.64, r: 0.54 }, // ângulo da mandíbula
+  { y: -0.88, r: 0.34 }, // queixo, mais definido
+  { y: -0.98, r: 0 }, // fecha logo abaixo do queixo — sem pescoço
 ];
 
 const DEPTH_SCALE = 0.86; // a cabeça é um pouco mais achatada de frente pra trás do que de lado a lado
 
-const EYE_ANGLE = 0.52;
-const EYE_Y = 0.16;
-const EYE_ANGLE_R = 0.3;
-const EYE_Y_R = 0.17;
+const EYE_ANGLE = 0.5;
+const EYE_Y = -0.24;
+const EYE_ANGLE_R = 0.28;
+const EYE_Y_R = 0.16;
 
-const MOUTH_Y = -0.3;
-const MOUTH_ANGLE_R = 0.13;
-const MOUTH_Y_R = 0.055;
+const BROW_Y = -0.06;
+const BROW_ANGLE_R = 0.6;
+const BROW_Y_R = 0.09;
+const BROW_STRENGTH = 0.12;
 
-const NOSE_Y = 0.0;
-const NOSE_ANGLE_R = 0.32;
-const NOSE_Y_R = 0.2;
-const NOSE_STRENGTH = 0.5;
+const MOUTH_Y = -0.66;
+const MOUTH_ANGLE_R = 0.15;
+const MOUTH_Y_R = 0.06;
+
+const NOSE_Y = -0.41;
+const NOSE_ANGLE_R = 0.19;
+const NOSE_Y_R = 0.22;
+const NOSE_STRENGTH_BRIDGE = 0.34;
+const NOSE_STRENGTH_TIP = 0.66;
 
 const EAR_SIDES = [-1, 1] as const;
-const EAR_Y = 0.05;
-const EAR_COUNT_PER_SIDE = 16;
+const EAR_Y = -0.34;
+const EAR_RADIUS = 0.15;
+const EAR_RING_POINTS = 11;
+const EAR_LOBE_POINTS = 4;
 
 const HEAD_NODE_COUNT = 480;
 const NEIGHBORS_PER_NODE = 2;
@@ -74,6 +82,9 @@ function idleAlphaFor(frontness: number, isIntersection: boolean): number {
     : lerp(NODE_ALPHA_BACK, NODE_ALPHA_FRONT, blend);
 }
 const IDLE_JITTER = 0.01;
+// Amplitude do movimento lento dos estilhaços enquanto o texto está visível — bem maior e mais
+// lento que o jitter ambiente do rosto montado, pra ler como destroços flutuando, não como ruído.
+const DRIFT_AMPLITUDE = 0.07;
 
 // Rotação da cabeça acompanhando o mouse (só desktop com ponteiro fino) — mesmos ângulos/damping
 // da versão anterior, agora aplicados como rotação 3D real em vez de um tilt de CSS simulado.
@@ -133,18 +144,29 @@ function insideEyeSocket(angle: number, y: number): boolean {
 }
 
 function insideMouth(angle: number, y: number): boolean {
-  const da = angle / MOUTH_ANGLE_R;
-  const dy = (y - MOUTH_Y) / MOUTH_Y_R;
+  const da = angle / (MOUTH_ANGLE_R * 1.6);
+  const dy = (y - MOUTH_Y) / (MOUTH_Y_R * 1.6);
   return da * da + dy * dy < 1;
 }
 
-/** Fator 0..NOSE_STRENGTH de quanto empurrar o ponto pra fora — cria o nariz sem precisar de uma malha à parte. */
+/** Empurra o ponto pra fora — cria o nariz sem precisar de uma malha à parte. Mais saliente
+ *  embaixo (ponta) do que em cima (ponte), pra não ficar um bulbo simétrico. */
 function noseBulge(angle: number, y: number): number {
   const da = angle / NOSE_ANGLE_R;
   const dy = (y - NOSE_Y) / NOSE_Y_R;
   const d2 = da * da + dy * dy;
   if (d2 >= 1) return 0;
-  return (1 - d2) * NOSE_STRENGTH;
+  const strength = y > NOSE_Y ? NOSE_STRENGTH_BRIDGE : NOSE_STRENGTH_TIP;
+  return (1 - d2) * strength;
+}
+
+/** Leve saliência acima dos olhos — sem isso o rosto fica liso demais entre a testa e os olhos. */
+function browBulge(angle: number, y: number): number {
+  const da = angle / BROW_ANGLE_R;
+  const dy = (y - BROW_Y) / BROW_Y_R;
+  const d2 = da * da + dy * dy;
+  if (d2 >= 1) return 0;
+  return (1 - d2) * BROW_STRENGTH;
 }
 
 interface HeadNode {
@@ -187,7 +209,7 @@ function buildHeadShellNodes(count: number): HeadNode[] {
         : (Math.random() * 2 - 1) * Math.PI;
     if (insideEyeSocket(angle, y) || insideMouth(angle, y)) continue;
 
-    const shellFrac = 0.82 + Math.random() * 0.18 + noseBulge(angle, y);
+    const shellFrac = 0.82 + Math.random() * 0.18 + noseBulge(angle, y) + browBulge(angle, y);
     const r = maxR * shellFrac;
 
     nodes.push(makeNode(Math.sin(angle) * r, y, Math.cos(angle) * r * DEPTH_SCALE, Math.cos(angle)));
@@ -196,24 +218,69 @@ function buildHeadShellNodes(count: number): HeadNode[] {
   return nodes;
 }
 
+/**
+ * Orelha com alguma estrutura reconhecível em vez de um borrão de pontos aleatórios: um "C" (a
+ * hélice externa, aberta do lado que encosta na cabeça), um ponto central (concha) e um pequeno
+ * aglomerado embaixo (lóbulo).
+ */
 function buildEarNodes(): HeadNode[] {
   const nodes: HeadNode[] = [];
-  const baseR = radiusAtHeight(EAR_Y) * 1.05;
+  const baseR = radiusAtHeight(EAR_Y) * 1.02;
 
   for (const side of EAR_SIDES) {
-    for (let i = 0; i < EAR_COUNT_PER_SIDE; i++) {
-      const x = side * baseR + side * Math.random() * 0.09;
-      const y = EAR_Y + (Math.random() - 0.5) * 0.22;
-      const z = (Math.random() - 0.5) * 0.14;
-      nodes.push(makeNode(x, y, z, 0));
+    const cx = side * baseR;
+
+    for (let i = 0; i < EAR_RING_POINTS; i++) {
+      const t = i / (EAR_RING_POINTS - 1);
+      const angle = lerp(-2.3, 2.3, t);
+      const ru = Math.cos(angle) * EAR_RADIUS;
+      const rv = Math.sin(angle) * EAR_RADIUS * 1.2;
+      const jitter = (Math.random() - 0.5) * 0.012;
+      nodes.push(makeNode(cx + side * (EAR_RADIUS * 0.4 + ru * 0.6 + jitter), EAR_Y + rv, side * ru * 0.35 + jitter, 0));
+    }
+
+    nodes.push(makeNode(cx + side * EAR_RADIUS * 0.35, EAR_Y, side * EAR_RADIUS * 0.12, 0));
+
+    for (let i = 0; i < EAR_LOBE_POINTS; i++) {
+      const v = -EAR_RADIUS * 1.1 - Math.random() * 0.05;
+      const u = (Math.random() - 0.5) * 0.06;
+      nodes.push(makeNode(cx + side * (EAR_RADIUS * 0.3 + u), EAR_Y + v, side * u, 0));
     }
   }
 
   return nodes;
 }
 
+const MOUTH_LINE_POINTS = 9;
+
+/** Boca como uma linha deliberada (não só o vazio deixado pela exclusão) — sutilmente saliente,
+ *  com uma leve curvatura pra cima nas pontas, mais "IA estilizada" do que um buraco no rosto. */
+function buildMouthNodes(): HeadNode[] {
+  const nodes: HeadNode[] = [];
+  const maxR = radiusAtHeight(MOUTH_Y);
+
+  for (let i = 0; i < MOUTH_LINE_POINTS; i++) {
+    const t = i / (MOUTH_LINE_POINTS - 1) - 0.5;
+    const angle = t * MOUTH_ANGLE_R * 2.2;
+    const curve = Math.cos(t * Math.PI) * 0.014;
+    const y = MOUTH_Y + curve;
+    const r = maxR * 1.008;
+    nodes.push(makeNode(Math.sin(angle) * r, y, Math.cos(angle) * r * DEPTH_SCALE, Math.cos(angle)));
+  }
+
+  for (let i = 0; i < MOUTH_LINE_POINTS - 3; i++) {
+    const t = (i + 1) / (MOUTH_LINE_POINTS - 2) - 0.5;
+    const angle = t * MOUTH_ANGLE_R * 1.7;
+    const y = MOUTH_Y - 0.03;
+    const r = maxR * 0.995;
+    nodes.push(makeNode(Math.sin(angle) * r, y, Math.cos(angle) * r * DEPTH_SCALE, Math.cos(angle)));
+  }
+
+  return nodes;
+}
+
 function buildHeadNodes(): HeadNode[] {
-  return [...buildHeadShellNodes(HEAD_NODE_COUNT), ...buildEarNodes()];
+  return [...buildHeadShellNodes(HEAD_NODE_COUNT), ...buildEarNodes(), ...buildMouthNodes()];
 }
 
 /**
@@ -416,6 +483,7 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
 
   const rotation = useRef({ x: 0, y: 0 });
   const pointer = useRef({ x: 0, y: 0, active: false });
+  const explodedTargetsRef = useRef<THREE.Vector3[] | null>(null);
 
   useEffect(() => {
     if (!fine || reducedMotion) return;
@@ -508,6 +576,25 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
         rotation.current.x += (targetX - rotation.current.x) * ROTATE_DAMPING;
         group.rotation.y = THREE.MathUtils.degToRad(rotation.current.y);
         group.rotation.x = THREE.MathUtils.degToRad(rotation.current.x);
+      }
+    } else if (modeRef.current === 'dissolved' && !reducedMotion) {
+      // Estilhaços continuam à deriva bem devagar no fundo, atrás do texto, em vez de
+      // congelarem no ponto exato onde a explosão parou.
+      const targets = explodedTargetsRef.current;
+      if (targets) {
+        const elapsed = state.clock.elapsedTime;
+
+        nodes.forEach((node, i) => {
+          const target = targets[i];
+          node.x = target.x + Math.sin(elapsed * 0.15 + i) * DRIFT_AMPLITUDE;
+          node.y = target.y + Math.cos(elapsed * 0.12 + i * 1.3) * DRIFT_AMPLITUDE;
+          node.z = target.z + Math.sin(elapsed * 0.1 + i * 0.7) * DRIFT_AMPLITUDE;
+        });
+
+        regularIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, false));
+        intersectionIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, true));
+        if (regularGeometryRef.current) regularGeometryRef.current.attributes.position.needsUpdate = true;
+        if (intersectionGeometryRef.current) intersectionGeometryRef.current.attributes.position.needsUpdate = true;
       }
     }
   });
@@ -627,6 +714,7 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
         ease: 'none',
         onUpdate: () => applyExplodeFrame(driver.t, delays, targets),
         onComplete: () => {
+          explodedTargetsRef.current = targets;
           modeRef.current = 'dissolved';
         },
       });
@@ -780,7 +868,7 @@ export function FaceGraphic({ className }: FaceGraphicProps) {
     <div ref={wrapperRef} className={className} style={{ position: 'relative' }}>
       <div className="h-full w-full cursor-pointer" onClick={() => controlsRef.current.explode()}>
         <Canvas
-          camera={{ position: [0, 0.05, 4.2], fov: 42 }}
+          camera={{ position: [0, 0, 2.85], fov: 42 }}
           dpr={[1, 2]}
           gl={{ antialias: true, alpha: true }}
           frameloop={frameloop}
