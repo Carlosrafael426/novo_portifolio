@@ -1,5 +1,5 @@
 import { Section } from '@/components/ui/Section';
-import { FaceGraphic } from '@/components/common/FaceGraphic';
+import { FaceGraphicSlot } from '@/components/common/FaceGraphicSlot';
 
 export function About() {
   return (
@@ -20,7 +20,7 @@ export function About() {
           </span>
         </p>
 
-        <FaceGraphic className="mt-8 h-[55vh] max-h-160 sm:h-[65vh]" />
+        <FaceGraphicSlot className="mt-8 aspect-4/5 h-[55vh] max-h-160 sm:h-[65vh]" />
       </div>
     </Section>
   );

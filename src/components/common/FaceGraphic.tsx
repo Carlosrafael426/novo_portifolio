@@ -1,138 +1,275 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
 import { gsap } from 'gsap';
-import { connectComponents, type ConstellationNode } from '@/utils/constellation';
 import { aboutContent } from '@/data/about';
 
-type Point = [number, number];
+const ACCENT_HEX = '#c6ff45';
+const WHITE_HEX = '#f5f5f2';
+const ACCENT_COLOR = new THREE.Color(ACCENT_HEX);
+const WHITE_COLOR = new THREE.Color(WHITE_HEX);
 
-const CENTER_X = 150;
-
-// Perfil do lado direito da cabeça, do topo do crânio até a base do pescoço (y crescente = mais
-// pra baixo) — mandíbula larga, queixo definido, pescoço curto (só "do pescoço pra cima", sem
-// ombros). O lado esquerdo é gerado espelhando esses mesmos pontos, o que garante uma silhueta
-// simétrica e sem auto-interseção (o risco de um polígono desenhado ponto a ponto nos dois lados).
-// Estreita de forma monótona do zigomático até o pescoço — nunca alarga de novo depois do
-// queixo, senão o pescoço lê como um segundo blob "amarrado" embaixo da cabeça em vez de um
-// pescoço só.
-const RIGHT_PROFILE: Point[] = [
-  [194, 26], // crânio superior
-  [230, 54], // crânio, ponto mais largo (têmpora)
-  [233, 88], // logo abaixo da têmpora, altura da orelha
-  [226, 120], // bochecha superior
-  [218, 150], // zigomático — mais largo do rosto (mandíbula larga, masculina)
-  [204, 176], // ângulo da mandíbula
-  [186, 200], // mandíbula inferior
-  [168, 220], // queixo
-  [160, 240], // topo do pescoço, mais estreito que a mandíbula
-  [158, 305], // base do pescoço (corte da silhueta), quase reto
+// Perfil da cabeça (raio máximo em função da altura Y), do topo do crânio até a base do pescoço —
+// os mesmos números validados na silhueta 2D anterior, só reescalados pra unidades de mundo 3D.
+// A cabeça é gerada girando esse perfil em torno do eixo Y (um "torno"), o que garante uma forma
+// arredondada e sem auto-interseção por construção — não depende de acertar um polígono à mão.
+const PROFILE: Array<{ y: number; r: number }> = [
+  { y: 1.36, r: 0 }, // topo do crânio
+  { y: 1.24, r: 0.44 },
+  { y: 0.96, r: 0.8 }, // têmpora, ponto mais largo do crânio
+  { y: 0.62, r: 0.83 },
+  { y: 0.3, r: 0.76 },
+  { y: 0.0, r: 0.68 }, // zigomático — mais largo do rosto
+  { y: -0.26, r: 0.54 }, // ângulo da mandíbula
+  { y: -0.5, r: 0.36 }, // queixo
+  { y: -0.7, r: 0.18 }, // topo do pescoço, mais estreito que a mandíbula
+  { y: -0.9, r: 0.1 },
+  { y: -1.55, r: 0.08 }, // base do pescoço (corte da silhueta)
 ];
 
-const FACE_POLY: Point[] = [
-  [CENTER_X, 14],
-  ...RIGHT_PROFILE,
-  ...RIGHT_PROFILE.slice()
-    .reverse()
-    .map(([x, y]): Point => [2 * CENTER_X - x, y]),
-];
+const DEPTH_SCALE = 0.86; // a cabeça é um pouco mais achatada de frente pra trás do que de lado a lado
 
-const EARS = [
-  { cx: CENTER_X - 95, cy: 104, rx: 13, ry: 24 },
-  { cx: CENTER_X + 95, cy: 104, rx: 13, ry: 24 },
-];
+const EYE_ANGLE = 0.52;
+const EYE_Y = 0.16;
+const EYE_ANGLE_R = 0.3;
+const EYE_Y_R = 0.17;
 
-const EXCLUDE = [
-  { cx: CENTER_X - 40, cy: 135, r: 13 }, // olho esquerdo
-  { cx: CENTER_X + 40, cy: 135, r: 13 }, // olho direito
-  { cx: CENTER_X - 13, cy: 190, r: 7 }, // boca, esquerda
-  { cx: CENTER_X + 13, cy: 190, r: 7 }, // boca, direita
-];
+const MOUTH_Y = -0.3;
+const MOUTH_ANGLE_R = 0.13;
+const MOUTH_Y_R = 0.055;
 
-const VIEW_WIDTH = 300;
-const VIEW_HEIGHT = 320;
-const NODE_COUNT = 260;
-const NODE_EDGE_BIAS = 0.55;
+const NOSE_Y = 0.0;
+const NOSE_ANGLE_R = 0.32;
+const NOSE_Y_R = 0.2;
+const NOSE_STRENGTH = 0.5;
+
+const EAR_SIDES = [-1, 1] as const;
+const EAR_Y = 0.05;
+const EAR_COUNT_PER_SIDE = 16;
+
+const HEAD_NODE_COUNT = 480;
 const NEIGHBORS_PER_NODE = 2;
-const MAX_CONNECT_DISTANCE = 26;
+const MAX_CONNECT_DISTANCE = 0.14;
 const INTERSECTION_DEGREE = 4;
 const PARTICLE_COUNT = 22;
 const PARTICLE_SPEED_MIN = 0.09;
 const PARTICLE_SPEED_MAX = 0.22;
 
-// Rotação da cabeça acompanhando o mouse (só desktop com ponteiro fino).
+const NODE_SIZE = 0.028;
+const INTERSECTION_NODE_SIZE = 0.045; // ~50% menor que a versão anterior do desenho neural
+const PARTICLE_SIZE = 0.045;
+// Opacidade por nó varia com frontness (ver HeadNode) — lado do rosto bem mais visível que a
+// nuca, senão a nuvem de pontos lê como uma esfera genérica em vez de uma cabeça com um lado de
+// frente. Corte não-linear (só o hemisfério da frente ganha gradiente; o resto vai direto pro
+// alpha de fundo) pra criar um limite de silhueta mais nítido, não um degradê suave.
+const NODE_ALPHA_FRONT = 0.6;
+const NODE_ALPHA_BACK = 0.05;
+const INTERSECTION_ALPHA_FRONT = 0.9;
+const INTERSECTION_ALPHA_BACK = 0.15;
+
+function idleAlphaFor(frontness: number, isIntersection: boolean): number {
+  const blend = Math.max(0, frontness);
+  return isIntersection
+    ? lerp(INTERSECTION_ALPHA_BACK, INTERSECTION_ALPHA_FRONT, blend)
+    : lerp(NODE_ALPHA_BACK, NODE_ALPHA_FRONT, blend);
+}
+const IDLE_JITTER = 0.01;
+
+// Rotação da cabeça acompanhando o mouse (só desktop com ponteiro fino) — mesmos ângulos/damping
+// da versão anterior, agora aplicados como rotação 3D real em vez de um tilt de CSS simulado.
 const MAX_ROTATE_Y = 18;
 const MAX_ROTATE_X = 8;
 const ROTATE_RANGE_PX = 420;
 const ROTATE_DAMPING = 0.06;
 
-function pointInPolygon(x: number, y: number, poly: Point[]): boolean {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [xi, yi] = poly[i];
-    const [xj, yj] = poly[j];
-    const intersect = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
-    if (intersect) inside = !inside;
-  }
-  return inside;
+// Timings/eases idênticos à animação de explosão/reconstrução anterior (só reimplementados pra
+// atualizar buffers Three.js em vez de atributos SVG) — não foram alterados.
+const EXPLODE_NODE_DURATION = 0.7;
+const EXPLODE_NODE_MAX_DELAY = 0.25;
+const EXPLODE_TOTAL = EXPLODE_NODE_DURATION + EXPLODE_NODE_MAX_DELAY;
+const EXPLODE_LINES_DURATION = 0.35;
+const EXPLODE_PUSH_MIN = 0.55;
+const EXPLODE_PUSH_MAX = 1.05;
+
+const REFORM_NODE_DURATION = 0.8;
+const REFORM_NODE_MAX_DELAY = 0.2;
+const REFORM_TOTAL = REFORM_NODE_DURATION + REFORM_NODE_MAX_DELAY;
+const REFORM_LINES_DELAY = 0.3;
+const REFORM_LINES_DURATION = 0.6;
+
+// Opacidade "de repouso" das linhas/partículas — o fade de explosão/reconstrução anima um fator
+// 0..1 que multiplica por cima desse valor, nunca substitui (senão elas ficam presas em opacidade
+// máxima depois de reconstruir).
+const LINES_BASE_OPACITY = 0.16;
+const PARTICLES_BASE_OPACITY = 0.9;
+
+const easeExplode = gsap.parseEase('power2.out');
+const easeReform = gsap.parseEase('power3.out');
+const easeLines = gsap.parseEase('power1.out');
+
+function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
 }
 
-function distToPolygonEdge(x: number, y: number, poly: Point[]): number {
-  let best = Infinity;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const [x1, y1] = poly[j];
-    const [x2, y2] = poly[i];
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const len2 = dx * dx + dy * dy || 1;
-    let t = ((x - x1) * dx + (y - y1) * dy) / len2;
-    t = Math.max(0, Math.min(1, t));
-    const px = x1 + t * dx;
-    const py = y1 + t * dy;
-    const d = Math.hypot(x - px, y - py);
-    if (d < best) best = d;
-  }
-  return best;
-}
-
-function insideEars(x: number, y: number): boolean {
-  return EARS.some((e) => ((x - e.cx) / e.rx) ** 2 + ((y - e.cy) / e.ry) ** 2 < 1);
-}
-function insideExclude(x: number, y: number): boolean {
-  return EXCLUDE.some((c) => Math.hypot(x - c.cx, y - c.cy) < c.r);
-}
-
-function buildRegionNodes(
-  count: number,
-  minX: number,
-  maxX: number,
-  minY: number,
-  maxY: number,
-  edgeBias: number,
-): ConstellationNode[] {
-  const nodes: ConstellationNode[] = [];
-  let attempts = 0;
-  while (nodes.length < count && attempts < count * 80) {
-    attempts += 1;
-    const x = minX + Math.random() * (maxX - minX);
-    const y = minY + Math.random() * (maxY - minY);
-    const inside = pointInPolygon(x, y, FACE_POLY) || insideEars(x, y);
-    if (!inside || insideExclude(x, y)) continue;
-
-    const nearEdge = distToPolygonEdge(x, y, FACE_POLY) < 16;
-    if (nearEdge || Math.random() < edgeBias) {
-      const r = Math.random() < 0.09 ? 0.9 + Math.random() * 0.45 : 0.7 + Math.random() * 0.7;
-      nodes.push({ baseX: x, baseY: y, x, y, r });
+function radiusAtHeight(y: number): number {
+  for (let i = 0; i < PROFILE.length - 1; i++) {
+    const a = PROFILE[i];
+    const b = PROFILE[i + 1];
+    if (y <= a.y && y >= b.y) {
+      const t = (a.y - y) / (a.y - b.y || 1);
+      return a.r + (b.r - a.r) * t;
     }
   }
+  return y > PROFILE[0].y ? PROFILE[0].r : PROFILE[PROFILE.length - 1].r;
+}
+
+function insideEyeSocket(angle: number, y: number): boolean {
+  for (const side of [-1, 1]) {
+    const da = (angle - side * EYE_ANGLE) / EYE_ANGLE_R;
+    const dy = (y - EYE_Y) / EYE_Y_R;
+    if (da * da + dy * dy < 1) return true;
+  }
+  return false;
+}
+
+function insideMouth(angle: number, y: number): boolean {
+  const da = angle / MOUTH_ANGLE_R;
+  const dy = (y - MOUTH_Y) / MOUTH_Y_R;
+  return da * da + dy * dy < 1;
+}
+
+/** Fator 0..NOSE_STRENGTH de quanto empurrar o ponto pra fora — cria o nariz sem precisar de uma malha à parte. */
+function noseBulge(angle: number, y: number): number {
+  const da = angle / NOSE_ANGLE_R;
+  const dy = (y - NOSE_Y) / NOSE_Y_R;
+  const d2 = da * da + dy * dy;
+  if (d2 >= 1) return 0;
+  return (1 - d2) * NOSE_STRENGTH;
+}
+
+interface HeadNode {
+  baseX: number;
+  baseY: number;
+  baseZ: number;
+  x: number;
+  y: number;
+  z: number;
+  /** cos(angle) no momento em que o nó foi gerado: 1 = rosto (frente), -1 = nuca (fundo do
+   *  crânio) — fixo por nó e gira junto com a cabeça, usado só pra dar mais brilho ao lado do
+   *  rosto do que ao "fundo" (sem isso, os pontos da nuca aparecem por trás com o mesmo peso
+   *  visual dos pontos do rosto e a nuvem lê como uma esfera genérica, não como um rosto). */
+  frontness: number;
+}
+
+function makeNode(x: number, y: number, z: number, frontness: number): HeadNode {
+  return { baseX: x, baseY: y, baseZ: z, x, y, z, frontness };
+}
+
+// A maioria dos nós nasce no hemisfério da frente — não é só estética, é o que faz o rosto
+// "ganhar" da nuca em densidade de pontos, além do gradiente de opacidade abaixo.
+const FRONT_HEMISPHERE_BIAS = 0.82;
+
+function buildHeadShellNodes(count: number): HeadNode[] {
+  const nodes: HeadNode[] = [];
+  const minY = PROFILE[PROFILE.length - 1].y;
+  const maxY = PROFILE[0].y;
+  let attempts = 0;
+
+  while (nodes.length < count && attempts < count * 60) {
+    attempts += 1;
+    const y = minY + Math.random() * (maxY - minY);
+    const maxR = radiusAtHeight(y);
+    if (maxR < 0.03) continue;
+
+    const angle =
+      Math.random() < FRONT_HEMISPHERE_BIAS
+        ? (Math.random() * 2 - 1) * (Math.PI / 2)
+        : (Math.random() * 2 - 1) * Math.PI;
+    if (insideEyeSocket(angle, y) || insideMouth(angle, y)) continue;
+
+    const shellFrac = 0.82 + Math.random() * 0.18 + noseBulge(angle, y);
+    const r = maxR * shellFrac;
+
+    nodes.push(makeNode(Math.sin(angle) * r, y, Math.cos(angle) * r * DEPTH_SCALE, Math.cos(angle)));
+  }
+
   return nodes;
 }
 
-function buildNodes(): ConstellationNode[] {
-  // Só cabeça+pescoço agora (sem ombros) — uma única região cobre a silhueta inteira sem
-  // precisar dividir orçamento entre sub-áreas de tamanho muito diferente.
-  return buildRegionNodes(NODE_COUNT, 35, 265, 8, 310, NODE_EDGE_BIAS);
+function buildEarNodes(): HeadNode[] {
+  const nodes: HeadNode[] = [];
+  const baseR = radiusAtHeight(EAR_Y) * 1.05;
+
+  for (const side of EAR_SIDES) {
+    for (let i = 0; i < EAR_COUNT_PER_SIDE; i++) {
+      const x = side * baseR + side * Math.random() * 0.09;
+      const y = EAR_Y + (Math.random() - 0.5) * 0.22;
+      const z = (Math.random() - 0.5) * 0.14;
+      nodes.push(makeNode(x, y, z, 0));
+    }
+  }
+
+  return nodes;
 }
 
-function buildConnections(nodes: ConstellationNode[]): Array<[number, number]> {
+function buildHeadNodes(): HeadNode[] {
+  return [...buildHeadShellNodes(HEAD_NODE_COUNT), ...buildEarNodes()];
+}
+
+/**
+ * Une componentes desconectados ao maior grafo (mesma garantia de "uma peça só" da versão 2D,
+ * só que por distância euclidiana 3D — mantido local porque o util compartilhado só entende 2D).
+ */
+function connectComponents3D(nodes: HeadNode[], pairs: Array<[number, number]>): Array<[number, number]> {
+  const parent = nodes.map((_, i) => i);
+  function find(i: number): number {
+    while (parent[i] !== i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  }
+  function union(a: number, b: number) {
+    parent[find(a)] = find(b);
+  }
+  for (const [a, b] of pairs) union(a, b);
+
+  const result = [...pairs];
+  for (;;) {
+    const groups = new Map<number, number[]>();
+    nodes.forEach((_, i) => {
+      const root = find(i);
+      const group = groups.get(root);
+      if (group) group.push(i);
+      else groups.set(root, [i]);
+    });
+    if (groups.size <= 1) break;
+
+    const components = [...groups.values()];
+    let best: { i: number; j: number; d: number } | null = null;
+    for (let a = 0; a < components.length; a++) {
+      for (let b = a + 1; b < components.length; b++) {
+        for (const i of components[a]) {
+          for (const j of components[b]) {
+            const d = Math.hypot(
+              nodes[i].baseX - nodes[j].baseX,
+              nodes[i].baseY - nodes[j].baseY,
+              nodes[i].baseZ - nodes[j].baseZ,
+            );
+            if (!best || d < best.d) best = { i, j, d };
+          }
+        }
+      }
+    }
+    if (!best) break;
+    result.push([best.i, best.j]);
+    union(best.i, best.j);
+  }
+
+  return result;
+}
+
+function buildConnections(nodes: HeadNode[]): Array<[number, number]> {
   const seen = new Set<string>();
   const pairs: Array<[number, number]> = [];
 
@@ -140,7 +277,7 @@ function buildConnections(nodes: ConstellationNode[]): Array<[number, number]> {
     const nearest = nodes
       .map((other, j) => ({
         j,
-        d: i === j ? Infinity : Math.hypot(node.baseX - other.baseX, node.baseY - other.baseY),
+        d: i === j ? Infinity : Math.hypot(node.baseX - other.baseX, node.baseY - other.baseY, node.baseZ - other.baseZ),
       }))
       .filter((entry) => entry.d < MAX_CONNECT_DISTANCE)
       .sort((a, b) => a.d - b.d)
@@ -154,7 +291,7 @@ function buildConnections(nodes: ConstellationNode[]): Array<[number, number]> {
     }
   });
 
-  return connectComponents(nodes, pairs);
+  return connectComponents3D(nodes, pairs);
 }
 
 interface Particle {
@@ -172,7 +309,7 @@ function buildParticles(connectionCount: number): Particle[] {
 }
 
 function buildFace() {
-  const nodes = buildNodes();
+  const nodes = buildHeadNodes();
   const connections = buildConnections(nodes);
 
   const degree = new Array(nodes.length).fill(0);
@@ -180,11 +317,18 @@ function buildFace() {
     degree[a] += 1;
     degree[b] += 1;
   }
-  const intersectionNodes = nodes.map((_, i) => degree[i] >= INTERSECTION_DEGREE);
+  const intersectionIndices: number[] = [];
+  const regularIndices: number[] = [];
+  nodes.forEach((_, i) => {
+    if (degree[i] >= INTERSECTION_DEGREE) intersectionIndices.push(i);
+    else regularIndices.push(i);
+  });
+
+  const nodeAlpha = nodes.map((node, i) => idleAlphaFor(node.frontness, degree[i] >= INTERSECTION_DEGREE));
 
   const particles = buildParticles(connections.length);
 
-  return { nodes, connections, intersectionNodes, particles };
+  return { nodes, connections, intersectionIndices, regularIndices, nodeAlpha, particles };
 }
 
 function isFinePointer(): boolean {
@@ -192,6 +336,402 @@ function isFinePointer(): boolean {
 }
 function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+function mixToWhite(amount: number): THREE.Color {
+  return ACCENT_COLOR.clone().lerp(WHITE_COLOR, amount);
+}
+
+type FaceData = ReturnType<typeof buildFace>;
+type Mode = 'idle' | 'dissolved' | 'transitioning';
+
+interface FaceControls {
+  explode: () => void;
+  reform: () => void;
+}
+
+interface HeadSceneProps {
+  data: FaceData;
+  modeRef: React.RefObject<Mode>;
+  controlsRef: React.RefObject<FaceControls>;
+  wrapperRef: React.RefObject<HTMLDivElement | null>;
+  reducedMotion: boolean;
+  fine: boolean;
+  onDissolvedChange: (dissolved: boolean) => void;
+}
+
+function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine, onDissolvedChange }: HeadSceneProps) {
+  const { nodes, connections, intersectionIndices, regularIndices, nodeAlpha, particles } = data;
+
+  const groupRef = useRef<THREE.Group>(null);
+  const regularGeometryRef = useRef<THREE.BufferGeometry>(null);
+  const intersectionGeometryRef = useRef<THREE.BufferGeometry>(null);
+  const linesGeometryRef = useRef<THREE.BufferGeometry>(null);
+  const linesMaterialRef = useRef<THREE.LineBasicMaterial>(null);
+  const particlesGeometryRef = useRef<THREE.BufferGeometry>(null);
+  const particlesMaterialRef = useRef<THREE.PointsMaterial>(null);
+
+  const buffers = useMemo(() => {
+    const regularPositions = new Float32Array(regularIndices.length * 3);
+    const regularColors = new Float32Array(regularIndices.length * 4);
+    const intersectionPositions = new Float32Array(intersectionIndices.length * 3);
+    const intersectionColors = new Float32Array(intersectionIndices.length * 4);
+    const linePositions = new Float32Array(connections.length * 2 * 3);
+    const particlePositions = new Float32Array(particles.length * 3);
+
+    regularIndices.forEach((nodeIndex, i) => {
+      const node = nodes[nodeIndex];
+      regularPositions[i * 3] = node.x;
+      regularPositions[i * 3 + 1] = node.y;
+      regularPositions[i * 3 + 2] = node.z;
+      regularColors[i * 4] = ACCENT_COLOR.r;
+      regularColors[i * 4 + 1] = ACCENT_COLOR.g;
+      regularColors[i * 4 + 2] = ACCENT_COLOR.b;
+      regularColors[i * 4 + 3] = nodeAlpha[nodeIndex];
+    });
+
+    const intersectionTint = mixToWhite(0.4);
+    intersectionIndices.forEach((nodeIndex, i) => {
+      const node = nodes[nodeIndex];
+      intersectionPositions[i * 3] = node.x;
+      intersectionPositions[i * 3 + 1] = node.y;
+      intersectionPositions[i * 3 + 2] = node.z;
+      intersectionColors[i * 4] = intersectionTint.r;
+      intersectionColors[i * 4 + 1] = intersectionTint.g;
+      intersectionColors[i * 4 + 2] = intersectionTint.b;
+      intersectionColors[i * 4 + 3] = nodeAlpha[nodeIndex];
+    });
+
+    return { regularPositions, regularColors, intersectionPositions, intersectionColors, linePositions, particlePositions };
+  }, [nodes, connections, intersectionIndices, regularIndices, nodeAlpha, particles]);
+
+  useEffect(() => {
+    for (const geometry of [regularGeometryRef.current, intersectionGeometryRef.current, linesGeometryRef.current, particlesGeometryRef.current]) {
+      const position = geometry?.attributes.position;
+      if (position instanceof THREE.BufferAttribute) position.setUsage(THREE.DynamicDrawUsage);
+      const color = geometry?.attributes.color;
+      if (color instanceof THREE.BufferAttribute) color.setUsage(THREE.DynamicDrawUsage);
+    }
+  }, []);
+
+  const rotation = useRef({ x: 0, y: 0 });
+  const pointer = useRef({ x: 0, y: 0, active: false });
+
+  useEffect(() => {
+    if (!fine || reducedMotion) return;
+    function handlePointerMove(event: PointerEvent) {
+      pointer.current.x = event.clientX;
+      pointer.current.y = event.clientY;
+      pointer.current.active = true;
+    }
+    window.addEventListener('pointermove', handlePointerMove);
+    return () => window.removeEventListener('pointermove', handlePointerMove);
+  }, [fine, reducedMotion]);
+
+  function writeConnectionsAndParticles() {
+    const linePos = linesGeometryRef.current?.attributes.position as THREE.BufferAttribute | undefined;
+    if (linePos) {
+      connections.forEach(([a, b], i) => {
+        const na = nodes[a];
+        const nb = nodes[b];
+        linePos.setXYZ(i * 2, na.x, na.y, na.z);
+        linePos.setXYZ(i * 2 + 1, nb.x, nb.y, nb.z);
+      });
+      linePos.needsUpdate = true;
+    }
+
+    const particlePos = particlesGeometryRef.current?.attributes.position as THREE.BufferAttribute | undefined;
+    if (particlePos) {
+      particles.forEach((particle, i) => {
+        const [a, b] = connections[particle.connectionIndex];
+        const na = nodes[a];
+        const nb = nodes[b];
+        particlePos.setXYZ(
+          i,
+          na.x + (nb.x - na.x) * particle.progress,
+          na.y + (nb.y - na.y) * particle.progress,
+          na.z + (nb.z - na.z) * particle.progress,
+        );
+      });
+      particlePos.needsUpdate = true;
+    }
+  }
+
+  function writeNodePosition(nodeIndex: number, listIndex: number, isIntersection: boolean) {
+    const geometry = isIntersection ? intersectionGeometryRef.current : regularGeometryRef.current;
+    const position = geometry?.attributes.position as THREE.BufferAttribute | undefined;
+    if (!position) return;
+    const node = nodes[nodeIndex];
+    position.setXYZ(listIndex, node.x, node.y, node.z);
+  }
+
+  useFrame((state, delta) => {
+    const group = groupRef.current;
+    if (!group) return;
+
+    if (modeRef.current === 'idle') {
+      if (!reducedMotion) {
+        const elapsed = state.clock.elapsedTime;
+
+        for (const particle of particles) {
+          particle.progress = (particle.progress + particle.speed * delta) % 1;
+        }
+
+        nodes.forEach((node, i) => {
+          node.x = node.baseX + Math.sin(elapsed * 0.4 + i) * IDLE_JITTER;
+          node.y = node.baseY + Math.cos(elapsed * 0.35 + i * 1.3) * IDLE_JITTER;
+          node.z = node.baseZ + Math.sin(elapsed * 0.3 + i * 0.7) * IDLE_JITTER;
+        });
+
+        regularIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, false));
+        intersectionIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, true));
+        if (regularGeometryRef.current) regularGeometryRef.current.attributes.position.needsUpdate = true;
+        if (intersectionGeometryRef.current) intersectionGeometryRef.current.attributes.position.needsUpdate = true;
+
+        writeConnectionsAndParticles();
+      }
+
+      if (fine && !reducedMotion) {
+        let targetY = 0;
+        let targetX = 0;
+        const wrapper = wrapperRef.current;
+        if (pointer.current.active && wrapper) {
+          const rect = wrapper.getBoundingClientRect();
+          const centerX = rect.left + rect.width / 2;
+          const centerY = rect.top + rect.height / 2;
+          const dx = pointer.current.x - centerX;
+          const dy = pointer.current.y - centerY;
+          targetY = Math.max(-1, Math.min(1, dx / ROTATE_RANGE_PX)) * MAX_ROTATE_Y;
+          targetX = Math.max(-1, Math.min(1, -dy / ROTATE_RANGE_PX)) * MAX_ROTATE_X;
+        }
+        rotation.current.y += (targetY - rotation.current.y) * ROTATE_DAMPING;
+        rotation.current.x += (targetX - rotation.current.x) * ROTATE_DAMPING;
+        group.rotation.y = THREE.MathUtils.degToRad(rotation.current.y);
+        group.rotation.x = THREE.MathUtils.degToRad(rotation.current.x);
+      }
+    }
+  });
+
+  useEffect(() => {
+    function applyExplodeFrame(t: number, delays: number[], targets: THREE.Vector3[]) {
+      const globalTime = t * EXPLODE_TOTAL;
+
+      nodes.forEach((node, i) => {
+        const localT = Math.max(0, Math.min(1, (globalTime - delays[i]) / EXPLODE_NODE_DURATION));
+        const eased = easeExplode(localT);
+        node.x = lerp(node.baseX, targets[i].x, eased);
+        node.y = lerp(node.baseY, targets[i].y, eased);
+        node.z = lerp(node.baseZ, targets[i].z, eased);
+      });
+
+      regularIndices.forEach((nodeIndex, i) => {
+        writeNodePosition(nodeIndex, i, false);
+        const localT = Math.max(0, Math.min(1, (globalTime - delays[nodeIndex]) / EXPLODE_NODE_DURATION));
+        const alpha = lerp(nodeAlpha[nodeIndex], 0, easeExplode(localT));
+        const color = regularGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
+        color?.setW(i, alpha);
+      });
+      intersectionIndices.forEach((nodeIndex, i) => {
+        writeNodePosition(nodeIndex, i, true);
+        const localT = Math.max(0, Math.min(1, (globalTime - delays[nodeIndex]) / EXPLODE_NODE_DURATION));
+        const alpha = lerp(nodeAlpha[nodeIndex], 0, easeExplode(localT));
+        const color = intersectionGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
+        color?.setW(i, alpha);
+      });
+
+      if (regularGeometryRef.current) {
+        regularGeometryRef.current.attributes.position.needsUpdate = true;
+        regularGeometryRef.current.attributes.color.needsUpdate = true;
+      }
+      if (intersectionGeometryRef.current) {
+        intersectionGeometryRef.current.attributes.position.needsUpdate = true;
+        intersectionGeometryRef.current.attributes.color.needsUpdate = true;
+      }
+
+      writeConnectionsAndParticles();
+
+      const groupT = Math.max(0, Math.min(1, globalTime / EXPLODE_LINES_DURATION));
+      const fade = lerp(1, 0, easeLines(groupT));
+      if (linesMaterialRef.current) linesMaterialRef.current.opacity = LINES_BASE_OPACITY * fade;
+      if (particlesMaterialRef.current) particlesMaterialRef.current.opacity = PARTICLES_BASE_OPACITY * fade;
+    }
+
+    function applyReformFrame(t: number, delays: number[], starts: THREE.Vector3[]) {
+      const globalTime = t * REFORM_TOTAL;
+
+      nodes.forEach((node, i) => {
+        const localT = Math.max(0, Math.min(1, (globalTime - delays[i]) / REFORM_NODE_DURATION));
+        const eased = easeReform(localT);
+        node.x = lerp(starts[i].x, node.baseX, eased);
+        node.y = lerp(starts[i].y, node.baseY, eased);
+        node.z = lerp(starts[i].z, node.baseZ, eased);
+      });
+
+      regularIndices.forEach((nodeIndex, i) => {
+        writeNodePosition(nodeIndex, i, false);
+        const localT = Math.max(0, Math.min(1, (globalTime - delays[nodeIndex]) / REFORM_NODE_DURATION));
+        const alpha = lerp(0, nodeAlpha[nodeIndex], easeReform(localT));
+        const color = regularGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
+        color?.setW(i, alpha);
+      });
+      intersectionIndices.forEach((nodeIndex, i) => {
+        writeNodePosition(nodeIndex, i, true);
+        const localT = Math.max(0, Math.min(1, (globalTime - delays[nodeIndex]) / REFORM_NODE_DURATION));
+        const alpha = lerp(0, nodeAlpha[nodeIndex], easeReform(localT));
+        const color = intersectionGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
+        color?.setW(i, alpha);
+      });
+
+      if (regularGeometryRef.current) {
+        regularGeometryRef.current.attributes.position.needsUpdate = true;
+        regularGeometryRef.current.attributes.color.needsUpdate = true;
+      }
+      if (intersectionGeometryRef.current) {
+        intersectionGeometryRef.current.attributes.position.needsUpdate = true;
+        intersectionGeometryRef.current.attributes.color.needsUpdate = true;
+      }
+
+      writeConnectionsAndParticles();
+
+      const groupT = Math.max(0, Math.min(1, (globalTime - REFORM_LINES_DELAY) / REFORM_LINES_DURATION));
+      const fade = lerp(0, 1, easeLines(groupT));
+      if (linesMaterialRef.current) linesMaterialRef.current.opacity = LINES_BASE_OPACITY * fade;
+      if (particlesMaterialRef.current) particlesMaterialRef.current.opacity = PARTICLES_BASE_OPACITY * fade;
+    }
+
+    function explode() {
+      if (modeRef.current !== 'idle') return;
+      modeRef.current = 'transitioning';
+      onDissolvedChange(true);
+
+      if (reducedMotion) {
+        modeRef.current = 'dissolved';
+        return;
+      }
+
+      const delays = nodes.map(() => Math.random() * EXPLODE_NODE_MAX_DELAY);
+      const targets = nodes.map((node) => {
+        const dist = Math.hypot(node.baseX, node.baseY, node.baseZ) || 1;
+        const push = EXPLODE_PUSH_MIN + Math.random() * (EXPLODE_PUSH_MAX - EXPLODE_PUSH_MIN);
+        return new THREE.Vector3(
+          node.baseX + (node.baseX / dist) * push,
+          node.baseY + (node.baseY / dist) * push,
+          node.baseZ + (node.baseZ / dist) * push,
+        );
+      });
+
+      const driver = { t: 0 };
+      gsap.to(driver, {
+        t: 1,
+        duration: EXPLODE_TOTAL,
+        ease: 'none',
+        onUpdate: () => applyExplodeFrame(driver.t, delays, targets),
+        onComplete: () => {
+          modeRef.current = 'dissolved';
+        },
+      });
+    }
+
+    function reform() {
+      if (modeRef.current !== 'dissolved') return;
+      modeRef.current = 'transitioning';
+      onDissolvedChange(false);
+
+      if (reducedMotion) {
+        modeRef.current = 'idle';
+        return;
+      }
+
+      const delays = nodes.map(() => Math.random() * REFORM_NODE_MAX_DELAY);
+      const starts = nodes.map((node) => new THREE.Vector3(node.x, node.y, node.z));
+
+      const driver = { t: 0 };
+      gsap.to(driver, {
+        t: 1,
+        duration: REFORM_TOTAL,
+        ease: 'none',
+        onUpdate: () => applyReformFrame(driver.t, delays, starts),
+        onComplete: () => {
+          nodes.forEach((node) => {
+            node.x = node.baseX;
+            node.y = node.baseY;
+            node.z = node.baseZ;
+          });
+          modeRef.current = 'idle';
+        },
+      });
+    }
+
+    controlsRef.current = { explode, reform };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dados/refs são estáveis (lazy-init), não precisam entrar nas deps
+  }, []);
+
+  return (
+    <group ref={groupRef}>
+      <points>
+        <bufferGeometry ref={regularGeometryRef}>
+          <bufferAttribute attach="attributes-position" args={[buffers.regularPositions, 3]} />
+          <bufferAttribute attach="attributes-color" args={[buffers.regularColors, 4]} />
+        </bufferGeometry>
+        <pointsMaterial vertexColors transparent sizeAttenuation depthWrite={false} size={NODE_SIZE} />
+      </points>
+
+      <points>
+        <bufferGeometry ref={intersectionGeometryRef}>
+          <bufferAttribute attach="attributes-position" args={[buffers.intersectionPositions, 3]} />
+          <bufferAttribute attach="attributes-color" args={[buffers.intersectionColors, 4]} />
+        </bufferGeometry>
+        <pointsMaterial vertexColors transparent sizeAttenuation depthWrite={false} size={INTERSECTION_NODE_SIZE} />
+      </points>
+
+      <lineSegments>
+        <bufferGeometry ref={linesGeometryRef}>
+          <bufferAttribute attach="attributes-position" args={[buffers.linePositions, 3]} />
+        </bufferGeometry>
+        <lineBasicMaterial ref={linesMaterialRef} color={ACCENT_HEX} transparent opacity={LINES_BASE_OPACITY} depthWrite={false} />
+      </lineSegments>
+
+      <points>
+        <bufferGeometry ref={particlesGeometryRef}>
+          <bufferAttribute attach="attributes-position" args={[buffers.particlePositions, 3]} />
+        </bufferGeometry>
+        <pointsMaterial
+          ref={particlesMaterialRef}
+          color={WHITE_HEX}
+          transparent
+          opacity={PARTICLES_BASE_OPACITY}
+          sizeAttenuation
+          depthWrite={false}
+          size={PARTICLE_SIZE}
+        />
+      </points>
+    </group>
+  );
+}
+
+function useIsVisible(ref: React.RefObject<HTMLDivElement | null>): boolean {
+  const [isIntersecting, setIsIntersecting] = useState(true);
+  const [isTabVisible, setIsTabVisible] = useState(!document.hidden);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    const observer = new IntersectionObserver(([entry]) => setIsIntersecting(entry.isIntersecting), { threshold: 0 });
+    observer.observe(element);
+
+    function handleVisibilityChange() {
+      setIsTabVisible(!document.hidden);
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      observer.disconnect();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [ref]);
+
+  return isIntersecting && isTabVisible;
 }
 
 interface CodeLine {
@@ -213,308 +753,54 @@ interface FaceGraphicProps {
 }
 
 /**
- * Constelação em formato de rosto (de frente, feições masculinas). Partículas viajam pelas
- * conexões; interseções (nós com várias linhas) brilham. O rosto acompanha o mouse virando a
- * cabeça (rotação 3D via CSS, só ponteiro fino) — olha pra tela em repouso. Um clique dispara a
- * explosão coordenada dos nós e revela o texto "sobre mim"; clicar no texto reconstrói o rosto.
- * Nunca toca o cursor nativo, só o próprio desenho.
+ * Cabeça humana em 3D (Three.js/R3F) renderizada como constelação — girada em torno do eixo Y a
+ * partir de um perfil validado (garante forma redonda sem auto-interseção), com olhos/boca como
+ * reentrâncias e nariz como saliência. Acompanha o mouse virando de verdade em 3D — olha pra tela
+ * em repouso. Clique dispara a mesma explosão/reconstrução de sempre e revela o texto "sobre
+ * mim"; clicar no texto reconstrói. Nunca toca o cursor nativo, só o próprio desenho.
  */
 export function FaceGraphic({ className }: FaceGraphicProps) {
-  const filterId = useId();
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const svgRef = useRef<SVGSVGElement>(null);
-  const overlayRef = useRef<HTMLDivElement>(null);
   const [dissolved, setDissolved] = useState(false);
 
-  const dataRef = useRef<ReturnType<typeof buildFace> | null>(null);
+  const dataRef = useRef<FaceData | null>(null);
   if (dataRef.current === null) {
     dataRef.current = buildFace();
   }
-  const { nodes, connections, intersectionNodes, particles } = dataRef.current;
 
-  const circleRefs = useRef<Array<SVGCircleElement | null>>([]);
-  const lineRefs = useRef<Array<SVGLineElement | null>>([]);
-  const particleRefs = useRef<Array<SVGCircleElement | null>>([]);
-  const modeRef = useRef<'idle' | 'dissolved' | 'transitioning'>('idle');
-  const reformRef = useRef<() => void>(() => {});
+  const modeRef = useRef<Mode>('idle');
+  const controlsRef = useRef<FaceControls>({ explode: () => {}, reform: () => {} });
 
-  useEffect(() => {
-    const wrapper = wrapperRef.current;
-    const svg = svgRef.current;
-    if (!wrapper || !svg) return;
-
-    const reducedMotion = prefersReducedMotion();
-    const fine = isFinePointer();
-
-    let isVisible = true;
-    const observer = new IntersectionObserver(([entry]) => {
-      isVisible = entry.isIntersecting;
-    }, { threshold: 0 });
-    observer.observe(svg);
-
-    const pointer = { x: 0, y: 0, active: false };
-    function handleWindowPointerMove(event: PointerEvent) {
-      pointer.x = event.clientX;
-      pointer.y = event.clientY;
-      pointer.active = true;
-    }
-    if (fine && !reducedMotion) {
-      window.addEventListener('pointermove', handleWindowPointerMove);
-    }
-
-    const rotation = { x: 0, y: 0 };
-
-    let frame: number | undefined;
-    let lastTimestamp: number | undefined;
-    if (!reducedMotion) {
-      const tick = (timestamp: number) => {
-        const deltaSeconds = lastTimestamp === undefined ? 0 : Math.min((timestamp - lastTimestamp) / 1000, 0.1);
-        lastTimestamp = timestamp;
-
-        if (isVisible && modeRef.current === 'idle') {
-          const elapsed = timestamp / 1000;
-
-          for (const particle of particles) {
-            particle.progress = (particle.progress + particle.speed * deltaSeconds) % 1;
-          }
-
-          nodes.forEach((node, i) => {
-            node.x = node.baseX + Math.sin(elapsed * 0.4 + i) * 1.2;
-            node.y = node.baseY + Math.cos(elapsed * 0.35 + i * 1.3) * 1.2;
-            const circle = circleRefs.current[i];
-            if (circle) {
-              circle.setAttribute('cx', node.x.toFixed(2));
-              circle.setAttribute('cy', node.y.toFixed(2));
-            }
-          });
-
-          connections.forEach(([a, b], i) => {
-            const line = lineRefs.current[i];
-            if (line) {
-              line.setAttribute('x1', nodes[a].x.toFixed(2));
-              line.setAttribute('y1', nodes[a].y.toFixed(2));
-              line.setAttribute('x2', nodes[b].x.toFixed(2));
-              line.setAttribute('y2', nodes[b].y.toFixed(2));
-            }
-          });
-
-          particles.forEach((particle, i) => {
-            const [a, b] = connections[particle.connectionIndex];
-            const px = nodes[a].x + (nodes[b].x - nodes[a].x) * particle.progress;
-            const py = nodes[a].y + (nodes[b].y - nodes[a].y) * particle.progress;
-            const dot = particleRefs.current[i];
-            if (dot) {
-              dot.setAttribute('cx', px.toFixed(2));
-              dot.setAttribute('cy', py.toFixed(2));
-            }
-          });
-
-          // Cabeça acompanha o mouse — olha pra tela (rotação 0) enquanto não houver posição
-          // real do ponteiro ainda.
-          if (fine) {
-            let targetY = 0;
-            let targetX = 0;
-            if (pointer.active) {
-              const rect = wrapper.getBoundingClientRect();
-              const centerX = rect.left + rect.width / 2;
-              const centerY = rect.top + rect.height / 2;
-              const dx = pointer.x - centerX;
-              const dy = pointer.y - centerY;
-              targetY = Math.max(-1, Math.min(1, dx / ROTATE_RANGE_PX)) * MAX_ROTATE_Y;
-              targetX = Math.max(-1, Math.min(1, -dy / ROTATE_RANGE_PX)) * MAX_ROTATE_X;
-            }
-            rotation.y += (targetY - rotation.y) * ROTATE_DAMPING;
-            rotation.x += (targetX - rotation.x) * ROTATE_DAMPING;
-            wrapper.style.transform = `perspective(1000px) rotateY(${rotation.y.toFixed(2)}deg) rotateX(${rotation.x.toFixed(2)}deg)`;
-          }
-        }
-        frame = requestAnimationFrame(tick);
-      };
-      frame = requestAnimationFrame(tick);
-    }
-
-    const ctx = gsap.context(() => {
-      // Máquina de estado simples: 'idle' (rosto normal, loop rodando) -> 'transitioning'
-      // (GSAP no controle) -> 'dissolved' (código visível, parado) -> 'transitioning' -> 'idle'.
-      // Animação de explosão/reconstrução intocada — só o gatilho (clique) mudou.
-      function explode() {
-        if (modeRef.current !== 'idle') return;
-        modeRef.current = 'transitioning';
-        setDissolved(true);
-        if (reducedMotion) {
-          modeRef.current = 'dissolved';
-          return;
-        }
-
-        const cx = VIEW_WIDTH / 2;
-        const cy = VIEW_HEIGHT / 2;
-        const targets = nodes.map((node) => {
-          const dx = node.baseX - cx;
-          const dy = node.baseY - cy;
-          const dist = Math.hypot(dx, dy) || 1;
-          const push = 70 + Math.random() * 90;
-          return { x: node.baseX + (dx / dist) * push, y: node.baseY + (dy / dist) * push };
-        });
-
-        circleRefs.current.forEach((circle, i) => {
-          if (!circle) return;
-          gsap.to(circle, {
-            attr: { cx: targets[i].x, cy: targets[i].y },
-            opacity: 0,
-            duration: 0.7,
-            ease: 'power2.out',
-            delay: Math.random() * 0.25,
-          });
-        });
-        gsap.to([...lineRefs.current, ...particleRefs.current], {
-          opacity: 0,
-          duration: 0.35,
-          ease: 'power1.out',
-          onComplete: () => {
-            modeRef.current = 'dissolved';
-          },
-        });
-      }
-
-      function reform() {
-        if (modeRef.current !== 'dissolved') return;
-        modeRef.current = 'transitioning';
-        setDissolved(false);
-        if (reducedMotion) {
-          modeRef.current = 'idle';
-          return;
-        }
-
-        circleRefs.current.forEach((circle, i) => {
-          if (!circle) return;
-          gsap.to(circle, {
-            attr: { cx: nodes[i].baseX, cy: nodes[i].baseY },
-            opacity: intersectionNodes[i] ? 0.65 : 0.3,
-            duration: 0.8,
-            ease: 'power3.out',
-            delay: Math.random() * 0.2,
-            onComplete: () => {
-              nodes[i].x = nodes[i].baseX;
-              nodes[i].y = nodes[i].baseY;
-            },
-          });
-        });
-        gsap.to([...lineRefs.current, ...particleRefs.current], {
-          opacity: 1,
-          duration: 0.6,
-          delay: 0.3,
-          ease: 'power1.out',
-          onComplete: () => {
-            modeRef.current = 'idle';
-          },
-        });
-      }
-
-      reformRef.current = reform;
-
-      function handleClick() {
-        if (modeRef.current === 'idle') explode();
-      }
-
-      svg.addEventListener('click', handleClick);
-
-      return () => {
-        svg.removeEventListener('click', handleClick);
-      };
-    }, svg);
-
-    return () => {
-      observer.disconnect();
-      if (fine && !reducedMotion) {
-        window.removeEventListener('pointermove', handleWindowPointerMove);
-      }
-      if (frame !== undefined) cancelAnimationFrame(frame);
-      ctx.revert();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- dados são estáveis (ref lazy-init), não precisam entrar nas deps
-  }, []);
+  const [reducedMotion] = useState(() => prefersReducedMotion());
+  const [fine] = useState(() => isFinePointer());
+  const isVisible = useIsVisible(wrapperRef);
+  const frameloop = !isVisible ? 'never' : reducedMotion ? 'demand' : 'always';
 
   return (
     <div ref={wrapperRef} className={className} style={{ position: 'relative' }}>
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
-        aria-hidden="true"
-        className="h-full w-auto cursor-pointer"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-      >
-        <defs>
-          <filter id={filterId} x="-200%" y="-200%" width="500%" height="500%">
-            <feGaussianBlur stdDeviation="1.8" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
-
-        {/* Área de detecção do clique cobrindo o viewBox inteiro — sem isso, só formas pintadas
-            (linhas/pontos finos) registrariam o clique, não o espaço vazio entre elas. */}
-        <rect x="0" y="0" width={VIEW_WIDTH} height={VIEW_HEIGHT} fill="transparent" />
-
-        <g stroke="#c6ff45" strokeWidth="0.5" opacity="0.16">
-          {connections.map(([a, b], i) => (
-            <line
-              key={i}
-              ref={(el) => {
-                lineRefs.current[i] = el;
-              }}
-              x1={nodes[a].x}
-              y1={nodes[a].y}
-              x2={nodes[b].x}
-              y2={nodes[b].y}
-            />
-          ))}
-        </g>
-
-        <g fill="#c6ff45">
-          {nodes.map((node, i) => (
-            <circle
-              key={i}
-              ref={(el) => {
-                circleRefs.current[i] = el;
-              }}
-              cx={node.x}
-              cy={node.y}
-              r={intersectionNodes[i] ? node.r + 0.3 : node.r}
-              opacity={intersectionNodes[i] ? 0.65 : 0.3}
-              filter={intersectionNodes[i] ? `url(#${filterId})` : undefined}
-            />
-          ))}
-        </g>
-
-        <g fill="#eaffb0" filter={`url(#${filterId})`}>
-          {particles.map((particle, i) => {
-            const [a, b] = connections[particle.connectionIndex];
-            const px = nodes[a].x + (nodes[b].x - nodes[a].x) * particle.progress;
-            const py = nodes[a].y + (nodes[b].y - nodes[a].y) * particle.progress;
-            return (
-              <circle
-                key={i}
-                ref={(el) => {
-                  particleRefs.current[i] = el;
-                }}
-                cx={px}
-                cy={py}
-                r={1.5}
-                opacity={0.9}
-              />
-            );
-          })}
-        </g>
-      </svg>
+      <div className="h-full w-full cursor-pointer" onClick={() => controlsRef.current.explode()}>
+        <Canvas
+          camera={{ position: [0, 0.05, 4.2], fov: 42 }}
+          dpr={[1, 2]}
+          gl={{ antialias: true, alpha: true }}
+          frameloop={frameloop}
+        >
+          <HeadScene
+            data={dataRef.current}
+            modeRef={modeRef}
+            controlsRef={controlsRef}
+            wrapperRef={wrapperRef}
+            reducedMotion={reducedMotion}
+            fine={fine}
+            onDissolvedChange={setDissolved}
+          />
+        </Canvas>
+      </div>
 
       {/* fixed (não absolute dentro do próprio gráfico) pra aparecer no meio da tela — clicável
           quando visível pra reconstruir o rosto. */}
       <div
-        ref={overlayRef}
-        onClick={() => reformRef.current()}
+        onClick={() => controlsRef.current.reform()}
         className={`fixed inset-0 z-(--z-mobile-menu) flex items-center justify-center p-4 transition-opacity duration-500 sm:p-8 ${dissolved ? 'pointer-events-auto cursor-pointer opacity-100' : 'pointer-events-none opacity-0'}`}
       >
         <div aria-hidden="true" className="bg-background/85 absolute inset-0" />
