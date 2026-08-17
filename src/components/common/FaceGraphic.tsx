@@ -212,12 +212,26 @@ function buildParticles(connectionCount: number): Particle[] {
   }));
 }
 
+/**
+ * Centro de massa de verdade, não o (0,0,0) da malha — a malha é uma casca frontal (Z vai de 0 a
+ * ~0.62 antes da escala, nunca negativo), então a origem dos dados fica encostada no fundo do
+ * relevo, não no meio dele. Explodir a partir de (0,0,0) empurraria tudo predominantemente pra
+ * frente (em direção à câmera); a partir do centroide, os nós se espalham de verdade ao redor de
+ * um ponto único e coerente.
+ */
+function computeCentroid(nodes: HeadNode[]): THREE.Vector3 {
+  const sum = new THREE.Vector3();
+  for (const node of nodes) sum.add(new THREE.Vector3(node.baseX, node.baseY, node.baseZ));
+  return sum.divideScalar(nodes.length || 1);
+}
+
 function buildFace(coarse: boolean) {
   const { nodes, connections, anatomicalIndices, fillIndices, zMax } = buildMeshNodeSet(coarse);
   const nodeAlpha = buildNodeAlpha(nodes.length, anatomicalIndices, nodes, zMax);
   const particles = buildParticles(connections.length);
+  const centroid = computeCentroid(nodes);
 
-  return { nodes, connections, anatomicalIndices, fillIndices, nodeAlpha, particles };
+  return { nodes, connections, anatomicalIndices, fillIndices, nodeAlpha, particles, centroid };
 }
 
 type FaceData = ReturnType<typeof buildFace>;
@@ -239,7 +253,7 @@ interface HeadSceneProps {
 }
 
 function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine, onDissolvedChange }: HeadSceneProps) {
-  const { nodes, connections, anatomicalIndices, fillIndices, nodeAlpha, particles } = data;
+  const { nodes, connections, anatomicalIndices, fillIndices, nodeAlpha, particles, centroid } = data;
 
   const groupRef = useRef<THREE.Group>(null);
   const fillGeometryRef = useRef<THREE.BufferGeometry>(null);
@@ -533,12 +547,15 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
 
       const delays = nodes.map(() => Math.random() * EXPLODE_NODE_MAX_DELAY);
       const targets = nodes.map((node) => {
-        const dist = Math.hypot(node.baseX, node.baseY, node.baseZ) || 1;
+        const dx = node.baseX - centroid.x;
+        const dy = node.baseY - centroid.y;
+        const dz = node.baseZ - centroid.z;
+        const dist = Math.hypot(dx, dy, dz) || 1;
         const push = EXPLODE_PUSH_MIN + Math.random() * (EXPLODE_PUSH_MAX - EXPLODE_PUSH_MIN);
         return new THREE.Vector3(
-          node.baseX + (node.baseX / dist) * push,
-          node.baseY + (node.baseY / dist) * push,
-          node.baseZ + (node.baseZ / dist) * push,
+          node.baseX + (dx / dist) * push,
+          node.baseY + (dy / dist) * push,
+          node.baseZ + (dz / dist) * push,
         );
       });
 
@@ -749,15 +766,21 @@ export function FaceGraphic({ className }: FaceGraphicProps) {
         </div>
       </button>
 
-      {/* absolute dentro da própria seção (não fixed/tela cheia) — o texto aparece na página, no
-          lugar onde o rosto estava, não como um modal flutuando por cima de tudo. Sem scrim de
-          tela cheia: os estilhaços continuam visíveis e à deriva atrás do texto, só a coluna de
-          texto ganha um véu localizado. */}
+      {/* fixed na tela (não na seção) — centraliza sempre no meio do viewport visível, não importa
+          em que ponto da seção (bem mais alta que 100vh) o clique aconteceu. Sem scrim de tela
+          cheia: os estilhaços continuam visíveis e à deriva atrás do texto (eles vivem no canvas
+          da seção, essa camada só cuida do texto por cima), só a coluna de texto ganha um véu
+          localizado. */}
       <div
         onClick={() => controlsRef.current.reform()}
-        className={`absolute inset-0 z-10 flex items-center justify-center p-4 transition-opacity duration-500 sm:p-8 ${dissolved ? 'pointer-events-auto cursor-pointer opacity-100' : 'pointer-events-none opacity-0'}`}
+        className={`fixed inset-0 z-10 flex items-center justify-center p-4 transition-opacity duration-500 sm:p-8 ${dissolved ? 'pointer-events-auto cursor-pointer opacity-100' : 'pointer-events-none opacity-0'}`}
       >
-        <div className="relative max-h-[80vh] max-w-lg overflow-y-auto">
+        {/* Sem max-height/scroll interno — o conteúdo é fixo (bio + filosofia + o que eu busco) e
+            cabe de sobra até em telas baixas; o card inteiro "emerge" de leve escala/profundidade
+            em vez de só aparecer, pra reforçar a sensação de vir de trás da explosão. */}
+        <div
+          className={`relative max-w-lg transition-all duration-500 ease-out-expo ${dissolved ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-6 scale-95 opacity-0'}`}
+        >
           {/* Véu localizado, só atrás do bloco de texto — cantos arredondados generosos em vez de
               uma máscara radial: um degradê elíptico deixa os cantos de um bloco alto e estreito
               (como no mobile) mal cobertos, sem escurecer o suficiente pra manter o contraste. */}
@@ -789,8 +812,8 @@ export function FaceGraphic({ className }: FaceGraphicProps) {
             {CODE_LINES.map((line, index) => (
               <p
                 key={index}
-                className={`${line.className} transition-opacity duration-400 ease-out ${dissolved ? 'opacity-100' : 'opacity-0'}`}
-                style={{ transitionDelay: dissolved ? `${index * 70}ms` : '0ms' }}
+                className={`${line.className} transition-all duration-500 ease-out-expo ${dissolved ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'}`}
+                style={{ transitionDelay: dissolved ? `${180 + index * 55}ms` : '0ms' }}
               >
                 {line.text}
               </p>
