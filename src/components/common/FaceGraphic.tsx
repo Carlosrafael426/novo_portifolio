@@ -781,19 +781,6 @@ export function FaceGraphic({ className }: FaceGraphicProps) {
         <div
           className={`relative max-w-lg transition-all duration-500 ease-out-expo ${dissolved ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-6 scale-95 opacity-0'}`}
         >
-          {/* Véu localizado, só atrás do bloco de texto — cantos arredondados generosos em vez de
-              uma máscara radial: um degradê elíptico deixa os cantos de um bloco alto e estreito
-              (como no mobile) mal cobertos, sem escurecer o suficiente pra manter o contraste. */}
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute -inset-x-6 -inset-y-6 rounded-[2.5rem] sm:-inset-x-12 sm:-inset-y-10"
-            style={{
-              backgroundColor: 'rgba(10, 10, 10, 0.35)',
-              backdropFilter: 'blur(10px)',
-              WebkitBackdropFilter: 'blur(10px)',
-            }}
-          />
-
           {dissolved && (
             <button
               type="button"
