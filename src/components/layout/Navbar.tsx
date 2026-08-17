@@ -12,7 +12,8 @@ import { Button } from '@/components/ui/Button';
 import { cn } from '@/utils/cn';
 
 const sectionIds = navItems.map((item) => item.sectionId);
-const CV_PATH = '/cv-carlos-rafael.pdf';
+// Prefixado pelo `base` do Vite — no GitHub Pages o site não fica na raiz do domínio.
+const CV_PATH = `${import.meta.env.BASE_URL}cv-carlos-rafael.pdf`;
 
 export function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);

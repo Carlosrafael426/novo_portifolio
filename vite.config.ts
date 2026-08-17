@@ -3,7 +3,10 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath, URL } from 'node:url';
 
-export default defineConfig({
+// GitHub Pages serve o site em /novo_portifolio/, não na raiz do domínio.
+// Em dev o base continua '/' para não poluir a URL do localhost.
+export default defineConfig(({ mode }) => ({
+  base: mode === 'production' ? '/novo_portifolio/' : '/',
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
@@ -13,4 +16,4 @@ export default defineConfig({
   build: {
     sourcemap: true,
   },
-});
+}));

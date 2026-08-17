@@ -13,15 +13,19 @@ function withSuspense(element: ReactNode) {
   return <Suspense fallback={<PageLoader />}>{element}</Suspense>;
 }
 
-export const router = createBrowserRouter([
-  {
-    path: '/',
-    element: <RootLayout />,
-    errorElement: <RouteErrorBoundary />,
-    children: [
-      { index: true, element: withSuspense(<HomePage />) },
-      { path: 'projects/:slug', element: withSuspense(<ProjectDetailPage />) },
-      { path: '*', element: withSuspense(<NotFoundPage />) },
-    ],
-  },
-]);
+export const router = createBrowserRouter(
+  [
+    {
+      path: '/',
+      element: <RootLayout />,
+      errorElement: <RouteErrorBoundary />,
+      children: [
+        { index: true, element: withSuspense(<HomePage />) },
+        { path: 'projects/:slug', element: withSuspense(<ProjectDetailPage />) },
+        { path: '*', element: withSuspense(<NotFoundPage />) },
+      ],
+    },
+  ],
+  // Acompanha o `base` do Vite: '/' em dev, '/novo_portifolio/' no GitHub Pages.
+  { basename: import.meta.env.BASE_URL },
+);
