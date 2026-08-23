@@ -19,8 +19,9 @@ import {
 import type { Technology } from '@/types/technology';
 
 /** Ícone de verdade de cada tecnologia (Simple Icons) — só "APIs REST" fica com um ícone
- *  genérico, já que não é uma marca com logo próprio. */
-type IconComponent = ComponentType<{
+ *  genérico, já que não é uma marca com logo próprio. Exportado porque TechnologyGroup usa o
+ *  mesmo formato pros ícones oficiais de categoria. */
+export type IconComponent = ComponentType<{
   'aria-hidden'?: boolean | 'true' | 'false';
   size?: number;
   className?: string;
