@@ -164,13 +164,17 @@ export function Stack() {
           // (cabeçalho nunca chegou a ficar visível, ex: um pulo direto de scroll), os cards não
           // ficam presos esperando uma sequência que nunca vai rodar.
           const delay = (headerInView ? HEADER_SEQUENCE_MS : 0) + index * CARD_STAGGER_MS;
+          const revealed = headerInView || gridInView;
 
           return (
-            <div
-              key={category}
-              style={revealStyle(headerInView || gridInView, hidden, CARD_DURATION_MS, delay, reducedMotion)}
-            >
-              <TechnologyGroup category={category} technologies={grouped[category] ?? []} />
+            <div key={category} style={revealStyle(revealed, hidden, CARD_DURATION_MS, delay, reducedMotion)}>
+              <TechnologyGroup
+                category={category}
+                technologies={grouped[category] ?? []}
+                revealed={revealed}
+                startDelayMs={delay + CARD_DURATION_MS}
+                reducedMotion={reducedMotion}
+              />
             </div>
           );
         })}

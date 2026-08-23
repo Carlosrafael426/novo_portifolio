@@ -17,12 +17,25 @@ const categoryIcons: Record<TechnologyCategory, LucideIcon> = {
   infrastructure: GitBranch,
 };
 
+const ROW_FILL_STAGGER_MS = 80;
+
 interface TechnologyGroupProps {
   category: TechnologyCategory;
   technologies: Technology[];
+  /** Se o card já começou a aparecer (herdado do Stack) — as barras só enchem depois disso. */
+  revealed: boolean;
+  /** Quando o card termina de deslizar pro lugar — as barras começam a encher a partir daqui. */
+  startDelayMs: number;
+  reducedMotion: boolean;
 }
 
-export function TechnologyGroup({ category, technologies }: TechnologyGroupProps) {
+export function TechnologyGroup({
+  category,
+  technologies,
+  revealed,
+  startDelayMs,
+  reducedMotion,
+}: TechnologyGroupProps) {
   const Icon = categoryIcons[category];
 
   return (
@@ -47,8 +60,14 @@ export function TechnologyGroup({ category, technologies }: TechnologyGroupProps
       </div>
 
       <ul className="mt-5">
-        {technologies.map((technology) => (
-          <TechnologyCard key={technology.id} technology={technology} />
+        {technologies.map((technology, index) => (
+          <TechnologyCard
+            key={technology.id}
+            technology={technology}
+            revealed={revealed}
+            fillDelayMs={startDelayMs + index * ROW_FILL_STAGGER_MS}
+            reducedMotion={reducedMotion}
+          />
         ))}
       </ul>
     </div>

@@ -1,9 +1,9 @@
 export type TechnologyCategory = 'frontend' | 'backend' | 'database' | 'infrastructure';
-export type TechnologyLevel = 'principal' | 'apoio' | 'estudando';
 
 export interface Technology {
   id: string;
   name: string;
   category: TechnologyCategory;
-  level: TechnologyLevel;
+  /** 0–100: o quanto eu domino essa tecnologia hoje, mostrado como barra de progresso. */
+  progress: number;
 }
