@@ -32,6 +32,8 @@
   --animate-system-pulse: system-pulse 3.5s ease-in-out infinite;
   --animate-scroll-hint: scroll-hint 1.8s ease-in-out infinite;
   --animate-cursor-blink: cursor-blink 1s step-end infinite;
+  /* Rotação contínua do hexágono dos ícones de stack — sem depender de hover. */
+  --animate-hex-spin: hex-spin 12s linear infinite;
 }
 
 @keyframes system-pulse {
@@ -56,6 +58,12 @@
 @keyframes cursor-blink {
   50% {
     opacity: 0;
+  }
+}
+
+@keyframes hex-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 

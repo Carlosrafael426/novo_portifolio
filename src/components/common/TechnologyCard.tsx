@@ -1,40 +1,47 @@
+import type { ComponentType } from 'react';
+import { Webhook } from 'lucide-react';
 import {
-  Atom,
-  Braces,
-  Code2,
-  Database,
-  FileCode,
-  FileCode2,
-  FolderGit2,
-  GitBranch,
-  Hexagon,
-  Palette,
-  PenTool,
-  Rocket,
-  Server,
-  Webhook,
-  Wind,
-  Zap,
-} from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+  SiCss,
+  SiExpress,
+  SiFigma,
+  SiGit,
+  SiGithub,
+  SiHtml5,
+  SiJavascript,
+  SiNodedotjs,
+  SiPostgresql,
+  SiReact,
+  SiTailwindcss,
+  SiTypescript,
+  SiVercel,
+  SiVite,
+} from 'react-icons/si';
 import type { Technology, TechnologyLevel } from '@/types/technology';
 
-const icons: Record<string, LucideIcon> = {
-  react: Atom,
-  typescript: FileCode,
-  javascript: Braces,
-  html: FileCode2,
-  css: Palette,
-  tailwind: Wind,
-  vite: Zap,
-  nodejs: Hexagon,
-  express: Server,
+/** Ícone de verdade de cada tecnologia (Simple Icons) — só "APIs REST" fica com um ícone
+ *  genérico, já que não é uma marca com logo próprio. */
+type IconComponent = ComponentType<{
+  'aria-hidden'?: boolean | 'true' | 'false';
+  size?: number;
+  className?: string;
+}>;
+
+const icons: Record<string, IconComponent> = {
+  react: SiReact,
+  typescript: SiTypescript,
+  javascript: SiJavascript,
+  html: SiHtml5,
+  css: SiCss,
+  tailwind: SiTailwindcss,
+  vite: SiVite,
+  nodejs: SiNodedotjs,
+  express: SiExpress,
   rest: Webhook,
-  postgresql: Database,
-  git: GitBranch,
-  github: FolderGit2,
-  vercel: Rocket,
-  figma: PenTool,
+  postgresql: SiPostgresql,
+  git: SiGit,
+  github: SiGithub,
+  vercel: SiVercel,
+  figma: SiFigma,
 };
 
 const levelLabels: Record<TechnologyLevel, string> = {
@@ -48,7 +55,7 @@ interface TechnologyCardProps {
 }
 
 export function TechnologyCard({ technology }: TechnologyCardProps) {
-  const Icon = icons[technology.id] ?? Code2;
+  const Icon = icons[technology.id] ?? Webhook;
 
   return (
     <li className="group text-muted hover:text-foreground flex items-center gap-3 py-2 text-sm transition-colors">
