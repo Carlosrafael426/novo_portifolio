@@ -51,9 +51,13 @@ export function TechnologyCard({ technology }: TechnologyCardProps) {
   const Icon = icons[technology.id] ?? Code2;
 
   return (
-    <li className="border-border text-muted hover:border-accent hover:text-foreground flex items-center gap-3 rounded-md border px-4 py-3 text-sm transition-colors">
-      <Icon aria-hidden="true" size={16} className="text-accent shrink-0" />
-      <span className="flex-1">{technology.name}</span>
+    <li className="group text-muted hover:text-foreground flex items-center gap-3 py-2 text-sm transition-colors">
+      <Icon
+        aria-hidden="true"
+        size={16}
+        className="text-accent shrink-0 transition-transform duration-300 group-hover:scale-110"
+      />
+      <span className="text-foreground flex-1">{technology.name}</span>
       <span className="text-muted font-mono text-[10px] tracking-wide uppercase">
         {levelLabels[technology.level]}
       </span>
