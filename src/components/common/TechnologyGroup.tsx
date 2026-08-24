@@ -1,8 +1,7 @@
-import { Hexagon } from 'lucide-react';
-import { SiGit, SiNodedotjs, SiPostgresql, SiReact } from 'react-icons/si';
+import { Database, Hexagon, Monitor, Server, Wrench } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { Technology, TechnologyCategory } from '@/types/technology';
 import { TechnologyCard } from '@/components/common/TechnologyCard';
-import type { IconComponent } from '@/components/common/TechnologyCard';
 
 const categoryLabels: Record<TechnologyCategory, string> = {
   frontend: 'Frontend',
@@ -11,13 +10,13 @@ const categoryLabels: Record<TechnologyCategory, string> = {
   infrastructure: 'Tools & Infra',
 };
 
-/** Ícone oficial da tecnologia mais representativa de cada categoria, não mais um ícone
- *  genérico — mesmo critério do resto da stack (Simple Icons). */
-const categoryIcons: Record<TechnologyCategory, IconComponent> = {
-  frontend: SiReact,
-  backend: SiNodedotjs,
-  database: SiPostgresql,
-  infrastructure: SiGit,
+/** Ícone universal da categoria, não de uma ferramenta específica — a marca de cada tecnologia
+ *  já aparece na linha dela mesma, na lista abaixo. */
+const categoryIcons: Record<TechnologyCategory, LucideIcon> = {
+  frontend: Monitor,
+  backend: Server,
+  database: Database,
+  infrastructure: Wrench,
 };
 
 const ROW_FILL_STAGGER_MS = 80;
@@ -52,6 +51,7 @@ export function TechnologyGroup({
           />
           <Icon
             aria-hidden="true"
+            strokeWidth={1.5}
             size={22}
             className="text-accent animate-system-pulse motion-reduce:animate-none relative"
           />
