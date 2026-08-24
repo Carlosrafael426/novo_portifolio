@@ -4,8 +4,6 @@ import { Hero } from '@/components/sections/Hero';
 import { About } from '@/components/sections/About';
 import { Stack } from '@/components/sections/Stack';
 import { Projects } from '@/components/sections/Projects';
-import { Engine } from '@/components/sections/Engine';
-import { Trajetoria } from '@/components/sections/Trajetoria';
 import { Contact } from '@/components/sections/Contact';
 
 export default function HomePage() {
@@ -21,8 +19,6 @@ export default function HomePage() {
       <About />
       <Stack />
       <Projects />
-      <Engine />
-      <Trajetoria />
       <Contact />
     </>
   );
