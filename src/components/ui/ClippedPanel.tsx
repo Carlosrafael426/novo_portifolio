@@ -32,10 +32,14 @@ export function ClippedPanel({ corners = 'all', cut = 20, wrapperClassName, clas
   const clip = clipPolygon(corners, cut);
 
   return (
-    <div className={cn('bg-accent/40 relative p-px', wrapperClassName)} style={{ clipPath: clip }}>
-      <div className={cn('bg-background', className)} style={{ clipPath: clip }}>
-        {children}
+    <div className={cn('relative', wrapperClassName)}>
+      <div className="bg-accent/40 p-px" style={{ clipPath: clip }}>
+        <div className={cn('bg-background', className)} style={{ clipPath: clip }}>
+          {children}
+        </div>
       </div>
+      {/* Fora da camada com clip-path — assim o brilho do pulso não é cortado pelo contorno e
+          aparece pros dois lados da borda (pra dentro e pra fora). */}
       <div
         aria-hidden="true"
         className="animate-border-travel motion-reduce:animate-none pointer-events-none absolute inset-0"
