@@ -3,6 +3,7 @@ import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { gsap } from 'gsap';
 import { aboutContent } from '@/data/about';
+import type { RichText } from '@/types/about';
 import faceMeshJson from '@/assets/face/face-mesh.json';
 
 const ACCENT_HEX = '#c6ff45';
@@ -675,22 +676,130 @@ function useIsVisible(ref: React.RefObject<HTMLDivElement | null>): boolean {
   return isIntersecting && isTabVisible;
 }
 
-interface CodeLine {
-  text: string;
-  className: string;
+type AboutBlock =
+  | { kind: 'paragraph'; segments: RichText }
+  | { kind: 'transition'; text: string }
+  | { kind: 'belief'; text: string }
+  | { kind: 'heading'; text: string }
+  | { kind: 'expectation'; title: string; description: string };
+
+const ABOUT_BLOCKS: AboutBlock[] = [
+  ...aboutContent.paragraphs.map((segments): AboutBlock => ({ kind: 'paragraph', segments })),
+  { kind: 'transition', text: aboutContent.transition },
+  { kind: 'belief', text: aboutContent.belief },
+  { kind: 'paragraph', segments: aboutContent.practice },
+  { kind: 'heading', text: aboutContent.expectationsHeading },
+  ...aboutContent.expectations.map(
+    (item): AboutBlock => ({ kind: 'expectation', title: item.title, description: item.description }),
+  ),
+  ...aboutContent.closing.map((segments): AboutBlock => ({ kind: 'paragraph', segments })),
+];
+
+/** Comprimento aproximado do texto de um bloco — usado só pra balancear as duas colunas abaixo. */
+function estimateBlockLength(block: AboutBlock): number {
+  switch (block.kind) {
+    case 'paragraph':
+      return block.segments.reduce((total, segment) => total + segment.text.length, 0);
+    case 'expectation':
+      return block.title.length + block.description.length;
+    case 'transition':
+    case 'belief':
+    case 'heading':
+      return block.text.length;
+  }
 }
 
-const CODE_LINES: CodeLine[] = [
-  { text: '// sobre-mim.ts', className: 'text-accent' },
-  ...aboutContent.bio.map((paragraph) => ({ text: `// ${paragraph}`, className: 'text-foreground/90 mt-2' })),
-  { text: '/**', className: 'text-accent mt-3' },
-  { text: ` * ${aboutContent.philosophy}`, className: 'text-foreground/90 italic' },
-  { text: ' */', className: 'text-accent' },
-  ...aboutContent.lookingFor.map((item) => ({ text: `// - ${item}`, className: 'text-muted mt-1' })),
-];
+interface IndexedAboutBlock {
+  block: AboutBlock;
+  /** Posição no array original — mantém a ordem de leitura na revelação em cascata mesmo depois
+   *  de dividir em duas colunas. */
+  index: number;
+}
+
+/** Divide os blocos em duas colunas manualmente, balanceando pelo comprimento estimado — evita
+ *  `columns-*` (CSS multicolumn), que tem bugs reais de renderização no Chromium com esse tipo de
+ *  conteúdo (blocos sobrepostos/cortados, ver comentário mais abaixo onde era usado antes). */
+function splitIntoColumns(blocks: AboutBlock[]): [IndexedAboutBlock[], IndexedAboutBlock[]] {
+  const indexed = blocks.map((block, index) => ({ block, index }));
+  const total = blocks.reduce((sum, block) => sum + estimateBlockLength(block), 0);
+  const half = total / 2;
+
+  let running = 0;
+  let splitIndex = indexed.length;
+  for (let i = 0; i < blocks.length; i++) {
+    running += estimateBlockLength(blocks[i]);
+    if (running >= half) {
+      splitIndex = i + 1;
+      break;
+    }
+  }
+
+  return [indexed.slice(0, splitIndex), indexed.slice(splitIndex)];
+}
+
+const ABOUT_COLUMNS = splitIntoColumns(ABOUT_BLOCKS);
+
+/** Renderiza um trecho de texto com os pedaços marcados como `strong` em destaque. */
+function RichTextSpan({ segments }: { segments: RichText }) {
+  return (
+    <>
+      {segments.map((segment, index) =>
+        segment.strong ? (
+          <strong key={index} className="text-foreground font-semibold">
+            {segment.text}
+          </strong>
+        ) : (
+          <span key={index}>{segment.text}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+interface AboutBlockLineProps {
+  block: AboutBlock;
+}
+
+/** Cada bloco mantém a linguagem visual de "comentário de código" já usada aqui (// e um bloco
+ *  estilo docblock pra frase de destaque), só varia o tratamento por tipo de bloco. */
+function AboutBlockLine({ block }: AboutBlockLineProps) {
+  switch (block.kind) {
+    case 'paragraph':
+      return (
+        <p className="text-foreground/90">
+          {'// '}
+          <RichTextSpan segments={block.segments} />
+        </p>
+      );
+    case 'transition':
+      return <p className="text-muted mt-1">{`// ${block.text}`}</p>;
+    case 'belief':
+      return (
+        <p className="text-accent mt-2">
+          {'/** '}
+          {block.text}
+          {' */'}
+        </p>
+      );
+    case 'heading':
+      return <p className="text-accent mt-3 tracking-wide uppercase">{`// === ${block.text} ===`}</p>;
+    case 'expectation':
+      return (
+        <p className="text-muted mt-1">
+          {'// - '}
+          <strong className="text-foreground font-semibold">{block.title}</strong>
+          {` — ${block.description}`}
+        </p>
+      );
+  }
+}
 
 interface FaceGraphicProps {
   className?: string;
+  /** Avisa a seção quando o texto abre/fecha — usado pra esconder o título estático da seção
+   *  enquanto o texto (bem maior agora, em duas colunas) ocupa esse mesmo espaço, já que o painel
+   *  não tem scrim de fundo (os estilhaços continuam visíveis atrás de propósito). */
+  onDissolvedChange?: (dissolved: boolean) => void;
 }
 
 /**
@@ -704,9 +813,13 @@ interface FaceGraphicProps {
  * Clicar no texto ou no botão "voltar" reconstrói o rosto. Nunca toca o cursor nativo, só o
  * próprio desenho.
  */
-export function FaceGraphic({ className }: FaceGraphicProps) {
+export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) {
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [dissolved, setDissolved] = useState(false);
+
+  useEffect(() => {
+    onDissolvedChange?.(dissolved);
+  }, [dissolved, onDissolvedChange]);
 
   const dataRef = useRef<FaceData | null>(null);
   if (dataRef.current === null) {
@@ -775,11 +888,15 @@ export function FaceGraphic({ className }: FaceGraphicProps) {
         onClick={() => controlsRef.current.reform()}
         className={`fixed inset-0 z-10 flex items-center justify-center p-4 transition-opacity duration-500 sm:p-8 ${dissolved ? 'pointer-events-auto cursor-pointer opacity-100' : 'pointer-events-none opacity-0'}`}
       >
-        {/* Sem max-height/scroll interno — o conteúdo é fixo (bio + filosofia + o que eu busco) e
-            cabe de sobra até em telas baixas; o card inteiro "emerge" de leve escala/profundidade
+        {/* O texto é bem mais longo agora (bio completa) — cabe sem rolar a página inteira em duas
+            colunas. Nada de `columns-*` (CSS multicolumn): testado e o Chromium renderiza os
+            blocos cortados/sobrepostos com esse conteúdo — em vez disso, os blocos já vêm
+            divididos em duas listas balanceadas por tamanho (splitIntoColumns) e cada uma vira uma
+            coluna comum de verdade (`grid-cols-2`). Em telas baixas o max-h + overflow-y-auto aqui
+            dentro é só uma rede de segurança; o card inteiro "emerge" de leve escala/profundidade
             em vez de só aparecer, pra reforçar a sensação de vir de trás da explosão. */}
         <div
-          className={`relative max-w-lg transition-all duration-500 ease-out-expo ${dissolved ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-6 scale-95 opacity-0'}`}
+          className={`relative max-h-[calc(100vh-2rem)] w-full max-w-5xl overflow-y-auto transition-all duration-500 ease-out-expo sm:max-h-[calc(100vh-4rem)] ${dissolved ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-6 scale-95 opacity-0'}`}
         >
           {dissolved && (
             <button
@@ -789,21 +906,32 @@ export function FaceGraphic({ className }: FaceGraphicProps) {
                 controlsRef.current.reform();
               }}
               aria-label="Voltar para a visualização do rosto"
-              className="outline-none relative float-right -mt-1 -mr-1 mb-2 font-mono text-[10px] tracking-wide text-muted uppercase hover:text-foreground focus-visible:outline-solid focus-visible:outline-accent focus-visible:outline-2 focus-visible:outline-offset-2 sm:text-xs"
+              className="outline-none sticky top-0 right-0 float-right -mt-1 -mr-1 mb-2 font-mono text-[10px] tracking-wide text-muted uppercase hover:text-foreground focus-visible:outline-solid focus-visible:outline-accent focus-visible:outline-2 focus-visible:outline-offset-2 sm:text-xs"
             >
               Voltar ×
             </button>
           )}
 
-          <div className="relative clear-both text-left font-mono text-[10px] leading-relaxed sm:text-xs">
-            {CODE_LINES.map((line, index) => (
-              <p
-                key={index}
-                className={`${line.className} transition-all duration-500 ease-out-expo ${dissolved ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'}`}
-                style={{ transitionDelay: dissolved ? `${180 + index * 55}ms` : '0ms' }}
-              >
-                {line.text}
-              </p>
+          <p
+            className={`text-accent clear-both text-left font-mono text-[10px] transition-all duration-500 ease-out-expo sm:text-xs ${dissolved ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'}`}
+            style={{ transitionDelay: dissolved ? '180ms' : '0ms' }}
+          >
+            // sobre-mim.ts
+          </p>
+
+          <div className="grid gap-x-10 text-left font-mono text-[10px] leading-relaxed sm:grid-cols-2 sm:text-xs">
+            {ABOUT_COLUMNS.map((column, columnIndex) => (
+              <div key={columnIndex} className="space-y-0">
+                {column.map(({ block, index }) => (
+                  <div
+                    key={index}
+                    className={`transition-opacity duration-500 ease-out-expo ${dissolved ? 'opacity-100' : 'opacity-0'}`}
+                    style={{ transitionDelay: dissolved ? `${220 + index * 35}ms` : '0ms' }}
+                  >
+                    <AboutBlockLine block={block} />
+                  </div>
+                ))}
+              </div>
             ))}
           </div>
         </div>

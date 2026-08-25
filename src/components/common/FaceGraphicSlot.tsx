@@ -6,13 +6,14 @@ const FaceGraphic = lazy(() =>
 
 interface FaceGraphicSlotProps {
   className?: string;
+  onDissolvedChange?: (dissolved: boolean) => void;
 }
 
 /** Isola o bundle do Three.js/WebGL do restante do app — só carrega quando a seção monta. */
-export function FaceGraphicSlot({ className }: FaceGraphicSlotProps) {
+export function FaceGraphicSlot({ className, onDissolvedChange }: FaceGraphicSlotProps) {
   return (
     <Suspense fallback={null}>
-      <FaceGraphic className={className} />
+      <FaceGraphic className={className} onDissolvedChange={onDissolvedChange} />
     </Suspense>
   );
 }
