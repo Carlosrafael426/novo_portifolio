@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import type { ContactFormErrors, ContactFormStatus, ContactFormValues } from '@/types/contact';
 import { submitContactForm } from '@/services/contactService';
 
-const initialValues: ContactFormValues = { name: '', email: '', message: '' };
+const initialValues: ContactFormValues = { name: '', email: '', subject: '', message: '' };
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function validate(values: ContactFormValues): ContactFormErrors {
