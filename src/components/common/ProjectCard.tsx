@@ -26,7 +26,13 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
   return (
     <li>
       <Link to={`/projects/${project.slug}`} className="group block h-full">
-        <ClippedPanel corners="all" cut={16} wrapperClassName="h-full" className="flex h-full flex-col p-6">
+        <ClippedPanel
+          corners="all"
+          cut={16}
+          pulse={false}
+          wrapperClassName="h-full"
+          className="flex h-92 flex-col p-6"
+        >
           <div className="flex items-start justify-between">
             <span className="text-accent font-mono text-xs">{String(index + 1).padStart(2, '0')}</span>
             <ArrowUpRight
@@ -56,7 +62,7 @@ export function ProjectCard({ project, index }: ProjectCardProps) {
           <h3 className="font-display text-foreground mt-2 text-lg font-normal tracking-widest uppercase">
             {project.title}
           </h3>
-          <p className="text-muted mt-2 flex-1 text-sm">{project.description}</p>
+          <p className="text-muted mt-2 line-clamp-3 flex-1 text-sm">{project.description}</p>
           <div className="mt-4 flex flex-wrap gap-2">
             {project.technologies.map((tech) => (
               <Badge key={tech}>{tech}</Badge>

@@ -11,6 +11,9 @@ interface ClippedPanelProps {
   cut?: number;
   /** Classes na camada externa (a cor da borda) — usar para margin/posicionamento do painel inteiro. */
   wrapperClassName?: string;
+  /** Pulso neon que percorre o contorno — ligado por padrão, desligável quando muitos painéis
+   *  juntos (ex: um grid de cards) ficam visualmente carregados com todos pulsando ao mesmo tempo. */
+  pulse?: boolean;
   className?: string;
   children: ReactNode;
 }
@@ -41,12 +44,21 @@ function clipPolygonPx(corners: ClippedCorners, cut: number, width: number, heig
  * mesmo contorno via `offset-path` — mesma linguagem visual do pulso que viaja pelas linhas do
  * fundo do Hero (base contínua discreta + trecho brilhante em movimento), não um ponto isolado.
  */
-export function ClippedPanel({ corners = 'all', cut = 20, wrapperClassName, className, children }: ClippedPanelProps) {
+export function ClippedPanel({
+  corners = 'all',
+  cut = 20,
+  wrapperClassName,
+  pulse = true,
+  className,
+  children,
+}: ClippedPanelProps) {
   const clip = clipPolygon(corners, cut);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
+    if (!pulse) return;
+
     const element = wrapperRef.current;
     if (!element) return;
 
@@ -57,11 +69,11 @@ export function ClippedPanel({ corners = 'all', cut = 20, wrapperClassName, clas
     observer.observe(element);
 
     return () => observer.disconnect();
-  }, []);
+  }, [pulse]);
 
   return (
     <div ref={wrapperRef} className={cn('relative', wrapperClassName)}>
-      <div className="bg-accent/40 p-px" style={{ clipPath: clip }}>
+      <div className={cn('p-px', pulse ? 'bg-accent/40' : 'bg-accent')} style={{ clipPath: clip }}>
         <div className={cn('bg-background', className)} style={{ clipPath: clip }}>
           {children}
         </div>
@@ -71,7 +83,7 @@ export function ClippedPanel({ corners = 'all', cut = 20, wrapperClassName, clas
           tamanho de 1px (não do tamanho do painel): como `offset-rotate: auto` gira o próprio
           box pra acompanhar a direção do contorno, um box do tamanho do painel giraria e sua
           bounding box varreria bem além do painel (e da página) em certos pontos do percurso. */}
-      {size ? (
+      {pulse && size ? (
         <div
           aria-hidden="true"
           className="animate-border-travel motion-reduce:animate-none pointer-events-none absolute top-0 left-0 h-px w-px"
