@@ -8,6 +8,8 @@ interface ClippedPanelProps {
   corners?: ClippedCorners;
   /** Tamanho do corte, em px. */
   cut?: number;
+  /** Classes na camada externa (a cor da borda) — usar para margin/posicionamento do painel inteiro. */
+  wrapperClassName?: string;
   className?: string;
   children: ReactNode;
 }
@@ -24,12 +26,12 @@ function clipPolygon(corners: ClippedCorners, cut: number): string {
  * duas camadas recortadas com o mesmo polígono (a de fora um pouco maior), já que `clip-path`
  * sozinho não desenha borda ao longo da diagonal cortada.
  */
-export function ClippedPanel({ corners = 'all', cut = 20, className, children }: ClippedPanelProps) {
+export function ClippedPanel({ corners = 'all', cut = 20, wrapperClassName, className, children }: ClippedPanelProps) {
   const clip = clipPolygon(corners, cut);
 
   return (
-    <div className="bg-border-strong p-px" style={{ clipPath: clip }}>
-      <div className={cn('bg-card', className)} style={{ clipPath: clip }}>
+    <div className={cn('bg-border-strong p-px', wrapperClassName)} style={{ clipPath: clip }}>
+      <div className={cn('bg-background', className)} style={{ clipPath: clip }}>
         {children}
       </div>
     </div>

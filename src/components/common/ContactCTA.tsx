@@ -35,7 +35,7 @@ export function ContactCTA() {
         ))}
       </ul>
 
-      <ClippedPanel corners="opposite" cut={24} className="relative mt-10 overflow-hidden p-6">
+      <ClippedPanel corners="opposite" cut={24} wrapperClassName="mt-10" className="relative overflow-hidden p-6">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute top-4 right-6 h-14 w-14 opacity-30"
