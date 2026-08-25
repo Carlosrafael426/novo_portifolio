@@ -2,22 +2,18 @@ import type { Project } from '@/types/project';
 
 export const projects: Project[] = [
   {
-    id: 'marcia-porto-cakes',
-    slug: 'marcia-porto-cakes',
-    title: 'Márcia Porto Cakes',
-    subtitle: 'Site para uma confeitaria artesanal',
+    id: 'missao-santa-faustina',
+    slug: 'missao-santa-faustina',
+    title: 'Missão Santa Faustina',
+    subtitle: 'Site institucional de uma missão católica',
     description:
-      'Site institucional para uma confeitaria artesanal. Meu primeiro projeto entregue para uma cliente de verdade, hoje no ar.',
+      'Site institucional da Missão Santa Faustina, em Fazenda Rio Grande (PR), com informações sobre a missão e suas atividades.',
     category: 'Cliente real',
-    technologies: ['React', 'Tailwind CSS', 'TypeScript'],
+    technologies: ['React', 'TypeScript', 'Tailwind CSS'],
+    liveUrl: 'https://carlosrafael426.github.io/missao-santa-faustina/',
+    githubUrl: 'https://github.com/Carlosrafael426/missao-santa-faustina',
     featured: true,
     year: 2026,
-    // TODO: preencher
-    liveUrl: undefined,
-    // TODO: preencher
-    githubUrl: undefined,
-    // TODO: preencher
-    image: undefined,
     caseStudy: {
       problem: '[Placeholder] Qual problema este projeto resolve.',
       solution: '[Placeholder] Como o problema foi resolvido.',
@@ -26,22 +22,17 @@ export const projects: Project[] = [
     },
   },
   {
-    id: 'finance-mate',
-    slug: 'finance-mate',
-    title: 'Finance Mate',
-    subtitle: 'Controle financeiro pessoal com login',
+    id: 'shinra',
+    slug: 'shinra',
+    title: 'Shinra',
+    subtitle: 'Site institucional de uma software house',
     description:
-      'Sistema de finanças pessoais com autenticação de usuário e dados persistidos em banco. Meu primeiro projeto de ponta a ponta.',
-    category: 'Full Stack',
-    technologies: ['React', 'Node.js', 'Express', 'PostgreSQL'],
+      'Plataforma institucional e comercial para uma agência de software especializada em microsserviços, SaaS escalável e aplicativos mobile, com terminal interativo e calculadora de orçamento.',
+    category: 'Landing page',
+    technologies: ['React', 'TypeScript', 'Tailwind CSS'],
+    githubUrl: 'https://github.com/Carlosrafael426/shinra',
     featured: true,
     year: 2026,
-    // TODO: preencher
-    liveUrl: undefined,
-    // TODO: preencher
-    githubUrl: undefined,
-    // TODO: preencher
-    image: undefined,
     caseStudy: {
       problem: '[Placeholder] Qual problema este projeto resolve.',
       solution: '[Placeholder] Como o problema foi resolvido.',
@@ -50,40 +41,51 @@ export const projects: Project[] = [
     },
   },
   {
-    id: 'pokedex',
-    slug: 'pokedex',
-    title: 'Pokédex Interativa',
-    subtitle: 'Consumo da PokeAPI com busca e detalhes',
+    id: 'historias-para-a-vida',
+    slug: 'historias-para-a-vida',
+    title: 'Histórias para a Vida',
+    subtitle: 'Site para uma autora, com catálogo de livros',
     description:
-      'Pokédex consumindo a PokeAPI, com busca, listagem e tela de detalhes de cada Pokémon.',
-    category: 'Web App',
-    technologies: ['React', 'TypeScript', 'APIs REST'],
+      'Site para uma autora, com catálogo de livros, página de lançamentos e seção sobre a autora.',
+    category: 'Cliente real',
+    technologies: ['React', 'TypeScript', 'Tailwind CSS'],
+    liveUrl: 'https://carlosrafael426.github.io/historias-para-a-vida/',
+    githubUrl: 'https://github.com/Carlosrafael426/historias-para-a-vida',
     featured: true,
     year: 2026,
-    // TODO: preencher
-    liveUrl: undefined,
-    // TODO: preencher
-    githubUrl: undefined,
-    // TODO: preencher
-    image: undefined,
+    caseStudy: {
+      problem: '[Placeholder] Qual problema este projeto resolve.',
+      solution: '[Placeholder] Como o problema foi resolvido.',
+      process: '[Placeholder] Etapas e processo de desenvolvimento.',
+      result: '[Placeholder] Resultado ou impacto alcançado.',
+    },
   },
   {
-    id: 'task-mate',
-    slug: 'task-mate',
-    title: 'Task Mate',
-    subtitle: 'Gerenciador de tarefas com persistência',
+    id: 'devclub-concurso',
+    slug: 'devclub-concurso',
+    title: 'DevClub',
+    subtitle: 'Landing page para uma comunidade de devs',
     description:
-      'Gerenciador de tarefas com criação, edição, conclusão e persistência entre sessões.',
-    category: 'Web App',
-    technologies: ['React', 'TypeScript'],
+      'Landing page com seções de mentores, empresas parceiras e depoimentos, com scroll suave e animações.',
+    category: 'Landing page',
+    technologies: ['React', 'TypeScript', 'GSAP'],
+    liveUrl: 'https://carlosrafael426.github.io/devclub-concurso/',
+    githubUrl: 'https://github.com/Carlosrafael426/devclub-concurso',
     featured: false,
     year: 2026,
-    // TODO: preencher
-    liveUrl: undefined,
-    // TODO: preencher
-    githubUrl: undefined,
-    // TODO: preencher
-    image: undefined,
+  },
+  {
+    id: 'pong',
+    slug: 'pong',
+    title: 'Pong',
+    subtitle: 'Recriação do Pong com placar e colisão',
+    description:
+      'Recriação do Pong, com controle de raquete, detecção de colisão, IA simples e placar, em JavaScript puro.',
+    category: 'Jogo',
+    technologies: ['JavaScript', 'HTML5 Canvas', 'CSS3'],
+    githubUrl: 'https://github.com/Carlosrafael426/Pong',
+    featured: false,
+    year: 2026,
   },
   {
     id: 'freeway',
@@ -94,32 +96,10 @@ export const projects: Project[] = [
       'Recriação do clássico do Atari: atravessar a via desviando do trânsito, feita em JavaScript puro.',
     category: 'Jogo',
     technologies: ['JavaScript', 'HTML5 Canvas', 'CSS3'],
+    liveUrl: 'https://freeway-game-six.vercel.app',
+    githubUrl: 'https://github.com/Carlosrafael426/freeway-game',
     featured: false,
     year: 2026,
-    // TODO: preencher
-    liveUrl: undefined,
-    // TODO: preencher
-    githubUrl: undefined,
-    // TODO: preencher
-    image: undefined,
-  },
-  {
-    id: 'pong',
-    slug: 'pong',
-    title: 'Pong',
-    subtitle: 'Recriação do Pong com placar e colisão',
-    description:
-      'Recriação do Pong, com controle de raquete, detecção de colisão e placar, em JavaScript puro.',
-    category: 'Jogo',
-    technologies: ['JavaScript', 'HTML5 Canvas', 'CSS3'],
-    featured: false,
-    year: 2026,
-    // TODO: preencher
-    liveUrl: undefined,
-    // TODO: preencher
-    githubUrl: undefined,
-    // TODO: preencher
-    image: undefined,
   },
 ];
 
