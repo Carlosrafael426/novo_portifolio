@@ -34,6 +34,8 @@
   --animate-cursor-blink: cursor-blink 1s step-end infinite;
   /* Rotação contínua do hexágono dos ícones de stack — sem depender de hover. */
   --animate-hex-spin: hex-spin 12s linear infinite;
+  /* Ponto que percorre o contorno dos painéis "HUD" (ClippedPanel) — anima offset-distance, não scale/box-shadow. */
+  --animate-border-travel: border-travel 6s linear infinite;
 }
 
 @keyframes system-pulse {
@@ -64,6 +66,12 @@
 @keyframes hex-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes border-travel {
+  to {
+    offset-distance: 100%;
   }
 }
 
