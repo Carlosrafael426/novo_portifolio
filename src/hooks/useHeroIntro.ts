@@ -2,31 +2,10 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { gsap } from 'gsap';
 
-const SESSION_KEY = 'hero_intro_seen';
 const SAFETY_TIMEOUT_MS = 7500;
 
 function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-}
-
-function alreadySeenThisSession(): boolean {
-  // Em dev a intro sempre roda de novo a cada reload — senão, ao iterar no navegador,
-  // a sessionStorage do primeiro load "gruda" e some pro resto da sessão de trabalho.
-  if (import.meta.env.DEV) return false;
-
-  try {
-    return sessionStorage.getItem(SESSION_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-
-function markSeen(): void {
-  try {
-    sessionStorage.setItem(SESSION_KEY, '1');
-  } catch {
-    // sessionStorage indisponível (modo privado etc.) — só não persiste entre navegações.
-  }
 }
 
 export interface HeroIntroRefs {
@@ -43,7 +22,7 @@ export interface HeroIntroRefs {
 }
 
 interface UseHeroIntroResult {
-  /** Se a sequência decorativa deve rodar (falso = reduced-motion ou já vista nesta sessão). */
+  /** Se a sequência decorativa deve rodar (falso só com reduced-motion). */
   shouldPlayIntro: boolean;
   refs: HeroIntroRefs;
 }
@@ -51,12 +30,12 @@ interface UseHeroIntroResult {
 /**
  * Orquestra a sequência de abertura do Hero: só o fundo (canvas) aparece de cara; a logo emerge
  * devagar e suave, com o header junto; só depois o restante do conteúdo entra em pares alternando
- * de lado, um de cada vez. Roda no máximo uma vez por sessão, respeita prefers-reduced-motion,
- * nunca bloqueia scroll/teclado, e nunca usa display/visibility (só opacity/transform/filter) pra
- * não quebrar leitor de tela nem causar layout shift.
+ * de lado, um de cada vez. Roda em todo carregamento/reload da página, respeita
+ * prefers-reduced-motion, nunca bloqueia scroll/teclado, e nunca usa display/visibility (só
+ * opacity/transform/filter) pra não quebrar leitor de tela nem causar layout shift.
  */
 export function useHeroIntro(): UseHeroIntroResult {
-  const [shouldPlayIntro] = useState(() => !prefersReducedMotion() && !alreadySeenThisSession());
+  const [shouldPlayIntro] = useState(() => !prefersReducedMotion());
 
   const root = useRef<HTMLElement>(null);
   const canvasWrapper = useRef<HTMLDivElement>(null);
@@ -96,8 +75,8 @@ export function useHeroIntro(): UseHeroIntroResult {
     ].filter((el): el is HTMLElement => el !== null);
 
     if (!shouldPlayIntro) {
-      // Fallback rápido (reduced-motion ou já vista nesta sessão): só o conteúdo do próprio Hero
-      // — o header é persistente entre navegações e não deve ser tocado/re-animado aqui.
+      // Fallback rápido (reduced-motion): só o conteúdo do próprio Hero — o header é persistente
+      // entre navegações e não deve ser tocado/re-animado aqui.
       const ctx = gsap.context(() => {
         gsap.from(revealTargets, { opacity: 0, duration: 0.25, ease: 'sine.out' });
       }, root);
@@ -113,7 +92,6 @@ export function useHeroIntro(): UseHeroIntroResult {
 
       const tl = gsap.timeline({
         defaults: { ease: 'expo.out' },
-        onComplete: markSeen,
       });
 
       tl.set(revealTargets, { opacity: 0 })
