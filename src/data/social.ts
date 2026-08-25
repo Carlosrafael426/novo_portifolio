@@ -2,7 +2,7 @@ import type { SocialLink } from '@/types/social';
 
 export const socialLinks: SocialLink[] = [
   { id: 'github', label: 'GitHub', href: 'https://github.com/Carlosrafael426', icon: 'github' },
-  { id: 'linkedin', label: 'LinkedIn', href: '#', icon: 'linkedin' }, // TODO: URL real
+  { id: 'linkedin', label: 'LinkedIn', href: 'https://www.linkedin.com/in/carlos-rafael-dev/', icon: 'linkedin' },
   {
     id: 'instagram',
     label: 'Instagram',

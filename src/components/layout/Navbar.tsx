@@ -9,6 +9,7 @@ import { useActiveSection } from '@/hooks/useActiveSection';
 import { scrollToSection } from '@/hooks/useHashScroll';
 import { Container } from '@/components/ui/Container';
 import { Button } from '@/components/ui/Button';
+import { SocialLinks } from '@/components/common/SocialLinks';
 import { cn } from '@/utils/cn';
 
 const sectionIds = navItems.map((item) => item.sectionId);
@@ -90,6 +91,8 @@ export function Navbar() {
         </nav>
 
         <div className="flex items-center justify-end gap-3">
+          <SocialLinks size={17} className="hidden gap-4 border-border border-r pr-4 lg:flex" />
+
           <Button href={CV_PATH} download variant="secondary" size="sm">
             <Download aria-hidden="true" size={14} />
             <span className="hidden sm:inline">Baixar CV</span>
@@ -131,6 +134,8 @@ export function Navbar() {
               </li>
             ))}
           </ul>
+
+          <SocialLinks className="border-border justify-center border-t px-4 py-4" />
         </nav>
       ) : null}
     </header>
