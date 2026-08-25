@@ -82,7 +82,11 @@ export function ClippedPanel({
           aparece pros dois lados da borda (pra dentro e pra fora). O elemento em si fica no
           tamanho de 1px (não do tamanho do painel): como `offset-rotate: auto` gira o próprio
           box pra acompanhar a direção do contorno, um box do tamanho do painel giraria e sua
-          bounding box varreria bem além do painel (e da página) em certos pontos do percurso. */}
+          bounding box varreria bem além do painel (e da página) em certos pontos do percurso.
+          Sem `offset-rotate` (nunca gira): nos cantos retos (não cortados, ex. `corners="opposite"`)
+          a tangente muda de direção de forma abrupta e o Chromium chega a desenhar um frame com a
+          rotação dessincronizada da posição — o pulso "sumia" bem no canto. Um brilho redondo (sem
+          direção) não depende de rotação nenhuma, então não tem esse ponto de falha. */}
       {pulse && size ? (
         <div
           aria-hidden="true"
@@ -90,11 +94,10 @@ export function ClippedPanel({
           style={{
             offsetPath: clipPolygonPx(corners, cut, size.width, size.height),
             offsetAnchor: '0 0',
-            offsetRotate: 'auto',
             offsetDistance: '0%',
           }}
         >
-          <span className="via-accent absolute h-px w-12 -translate-x-1/2 -translate-y-1/2 bg-linear-to-r from-transparent to-transparent shadow-[0_0_6px_1px_rgba(198,255,69,0.9),0_0_18px_6px_rgba(198,255,69,0.45)]" />
+          <span className="bg-accent absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full blur-[3px] shadow-[0_0_6px_1px_rgba(198,255,69,0.9),0_0_18px_6px_rgba(198,255,69,0.45)]" />
         </div>
       ) : null}
     </div>
