@@ -41,7 +41,7 @@ export function ClippedPanel({ corners = 'all', cut = 20, wrapperClassName, clas
         className="animate-border-travel motion-reduce:animate-none pointer-events-none absolute inset-0"
         style={{ offsetPath: clip, offsetAnchor: '0 0', offsetRotate: 'auto', offsetDistance: '0%' }}
       >
-        <span className="via-accent absolute h-px w-12 -translate-x-1/2 -translate-y-1/2 bg-linear-to-r from-transparent to-transparent shadow-[0_0_6px_1px_var(--color-accent)]" />
+        <span className="via-accent absolute h-px w-12 -translate-x-1/2 -translate-y-1/2 bg-linear-to-r from-transparent to-transparent shadow-[0_0_6px_1px_rgba(198,255,69,0.9),0_0_18px_6px_rgba(198,255,69,0.45)]" />
       </div>
     </div>
   );

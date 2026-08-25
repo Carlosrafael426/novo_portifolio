@@ -26,8 +26,17 @@ export function ContactCTA() {
         {features.map(({ icon: Icon, label }) => (
           <li key={label} className="flex items-center gap-4">
             <span className="relative flex h-9 w-9 shrink-0 items-center justify-center">
-              <Hexagon aria-hidden="true" strokeWidth={1} className="text-accent/70 absolute inset-0 h-full w-full" />
-              <Icon aria-hidden="true" size={16} strokeWidth={1.5} className="text-accent relative" />
+              <Hexagon
+                aria-hidden="true"
+                strokeWidth={1}
+                className="text-accent/70 animate-hex-spin motion-reduce:animate-none absolute inset-0 h-full w-full"
+              />
+              <Icon
+                aria-hidden="true"
+                size={16}
+                strokeWidth={1.5}
+                className="text-accent animate-system-pulse motion-reduce:animate-none relative"
+              />
             </span>
             <span className="text-foreground text-sm">{label}</span>
             <span aria-hidden="true" className="border-border-strong ml-1 h-px flex-1 border-t border-dotted" />
@@ -46,8 +55,17 @@ export function ContactCTA() {
         />
         <div className="relative flex items-start gap-4">
           <span className="relative flex h-12 w-12 shrink-0 items-center justify-center">
-            <Hexagon aria-hidden="true" strokeWidth={1} className="text-accent/70 absolute inset-0 h-full w-full" />
-            <MessageCircle aria-hidden="true" size={20} strokeWidth={1.5} className="text-accent relative" />
+            <Hexagon
+              aria-hidden="true"
+              strokeWidth={1}
+              className="text-accent/70 animate-hex-spin motion-reduce:animate-none absolute inset-0 h-full w-full"
+            />
+            <MessageCircle
+              aria-hidden="true"
+              size={20}
+              strokeWidth={1.5}
+              className="text-accent animate-system-pulse motion-reduce:animate-none relative"
+            />
           </span>
           <div>
             <p className="text-accent font-display text-sm font-normal tracking-widest uppercase">
