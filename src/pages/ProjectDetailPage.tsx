@@ -5,6 +5,7 @@ import { useDocumentTitle } from '@/hooks/useDocumentTitle';
 import { Container } from '@/components/ui/Container';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { ClippedPanel } from '@/components/ui/ClippedPanel';
 
 export default function ProjectDetailPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -58,6 +59,12 @@ export default function ProjectDetailPage() {
             </Button>
           ) : null}
         </div>
+
+        {project.image ? (
+          <ClippedPanel corners="all" cut={20} wrapperClassName="mt-10" className="overflow-hidden">
+            <img src={project.image} alt={`Captura de tela de ${project.title}`} className="w-full" />
+          </ClippedPanel>
+        ) : null}
 
         <p className="text-muted border-border mt-10 max-w-2xl border-t pt-8">
           {project.description}

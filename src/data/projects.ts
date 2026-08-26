@@ -1,4 +1,10 @@
 import type { Project } from '@/types/project';
+import missaoSantaFaustinaImg from '@/assets/projects/missao-santa-faustina.jpg';
+import shinraImg from '@/assets/projects/shinra.jpg';
+import historiasParaAVidaImg from '@/assets/projects/historias-para-a-vida.jpg';
+import devclubConcursoImg from '@/assets/projects/devclub-concurso.jpg';
+import pongImg from '@/assets/projects/pong.jpg';
+import freewayImg from '@/assets/projects/freeway.jpg';
 
 export const projects: Project[] = [
   {
@@ -10,6 +16,7 @@ export const projects: Project[] = [
       'Site institucional da Missão Santa Faustina, em Fazenda Rio Grande (PR), com informações sobre a missão e suas atividades.',
     category: 'Cliente real',
     technologies: ['React', 'TypeScript', 'Tailwind CSS'],
+    image: missaoSantaFaustinaImg,
     liveUrl: 'https://carlosrafael426.github.io/missao-santa-faustina/',
     githubUrl: 'https://github.com/Carlosrafael426/missao-santa-faustina',
     featured: true,
@@ -34,6 +41,7 @@ export const projects: Project[] = [
       'Plataforma institucional e comercial para uma agência de software especializada em microsserviços, SaaS escalável e aplicativos mobile, com terminal interativo e calculadora de orçamento.',
     category: 'Landing page',
     technologies: ['React', 'TypeScript', 'Tailwind CSS'],
+    image: shinraImg,
     githubUrl: 'https://github.com/Carlosrafael426/shinra',
     featured: true,
     year: 2026,
@@ -57,6 +65,7 @@ export const projects: Project[] = [
       'Site para uma autora, com catálogo de livros, página de lançamentos e seção sobre a autora.',
     category: 'Cliente real',
     technologies: ['React', 'TypeScript', 'Tailwind CSS'],
+    image: historiasParaAVidaImg,
     liveUrl: 'https://carlosrafael426.github.io/historias-para-a-vida/',
     githubUrl: 'https://github.com/Carlosrafael426/historias-para-a-vida',
     featured: true,
@@ -81,6 +90,7 @@ export const projects: Project[] = [
       'Landing page com seções de mentores, empresas parceiras e depoimentos, com scroll suave e animações.',
     category: 'Landing page',
     technologies: ['React', 'TypeScript', 'GSAP'],
+    image: devclubConcursoImg,
     liveUrl: 'https://carlosrafael426.github.io/devclub-concurso/',
     githubUrl: 'https://github.com/Carlosrafael426/devclub-concurso',
     featured: false,
@@ -104,6 +114,7 @@ export const projects: Project[] = [
       'Recriação do Pong, com controle de raquete, detecção de colisão, IA simples e placar, em JavaScript puro.',
     category: 'Jogo',
     technologies: ['JavaScript', 'HTML5 Canvas', 'CSS3'],
+    image: pongImg,
     githubUrl: 'https://github.com/Carlosrafael426/Pong',
     featured: false,
     year: 2026,
@@ -127,6 +138,7 @@ export const projects: Project[] = [
       'Recriação do clássico do Atari: atravessar a via desviando do trânsito, feita em JavaScript puro.',
     category: 'Jogo',
     technologies: ['JavaScript', 'HTML5 Canvas', 'CSS3'],
+    image: freewayImg,
     liveUrl: 'https://freeway-game-six.vercel.app',
     githubUrl: 'https://github.com/Carlosrafael426/freeway-game',
     featured: false,
