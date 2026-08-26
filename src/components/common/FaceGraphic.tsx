@@ -396,7 +396,7 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
           const dx = pointer.current.x - centerX;
           const dy = pointer.current.y - centerY;
           targetY = Math.max(-1, Math.min(1, dx / ROTATE_RANGE_PX)) * MAX_ROTATE_Y;
-          targetX = Math.max(-1, Math.min(1, -dy / ROTATE_RANGE_PX)) * MAX_ROTATE_X;
+          targetX = Math.max(-1, Math.min(1, dy / ROTATE_RANGE_PX)) * MAX_ROTATE_X;
         }
         rotation.current.y += (targetY - rotation.current.y) * ROTATE_DAMPING;
         rotation.current.x += (targetX - rotation.current.x) * ROTATE_DAMPING;
