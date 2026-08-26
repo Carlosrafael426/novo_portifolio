@@ -922,7 +922,7 @@ export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) 
             aparecer, pra reforçar a sensação de vir de trás da explosão. */}
         <div
           ref={panelRef}
-          className={`relative max-h-[calc(100vh-0.5rem)] w-full max-w-5xl overflow-y-auto transition-all duration-500 ease-out-expo sm:max-h-[calc(100vh-4rem)] ${dissolved ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-6 scale-95 opacity-0'}`}
+          className={`relative max-h-[calc(100vh-0.5rem)] w-full max-w-5xl overflow-x-hidden overflow-y-auto transition-all duration-500 ease-out-expo sm:max-h-[calc(100vh-4rem)] ${dissolved ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-6 scale-95 opacity-0'}`}
         >
           {dissolved && (
             <button
