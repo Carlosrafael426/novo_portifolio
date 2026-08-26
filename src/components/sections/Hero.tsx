@@ -5,6 +5,7 @@ import { SystemStatus } from '@/components/common/SystemStatus';
 import { ScrollIndicator } from '@/components/common/ScrollIndicator';
 import { useHeroIntro } from '@/hooks/useHeroIntro';
 import { scrollToSection } from '@/hooks/useHashScroll';
+import { whatsappUrl } from '@/data/social';
 
 const PHRASE_TEXT_CLASS = 'block text-[clamp(1.575rem,0.9rem+2.88vw,3.375rem)] leading-[1.05]';
 
@@ -78,14 +79,7 @@ export function Hero() {
           >
             Ver projetos →
           </HeroCta>
-          <HeroCta
-            href="#contato"
-            variant="secondary"
-            onClick={(event) => {
-              event.preventDefault();
-              scrollToSection('contato');
-            }}
-          >
+          <HeroCta href={whatsappUrl} target="_blank" rel="noreferrer" variant="secondary">
             Vamos conversar
           </HeroCta>
         </div>

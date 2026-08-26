@@ -4,7 +4,7 @@ import { ClippedPanel } from '@/components/ui/ClippedPanel';
 import { HeroCta } from '@/components/common/HeroCta';
 import { ProjectList } from '@/components/common/ProjectList';
 import { projects } from '@/data/projects';
-import { scrollToSection } from '@/hooks/useHashScroll';
+import { whatsappUrl } from '@/data/social';
 
 function TitleConnector() {
   return (
@@ -69,13 +69,7 @@ export function Projects() {
           </div>
         </div>
 
-        <HeroCta
-          href="#contato"
-          onClick={(event) => {
-            event.preventDefault();
-            scrollToSection('contato');
-          }}
-        >
+        <HeroCta href={whatsappUrl} target="_blank" rel="noreferrer">
           Vamos conversar →
         </HeroCta>
       </ClippedPanel>
