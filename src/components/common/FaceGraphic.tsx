@@ -772,20 +772,22 @@ function AboutBlockLine({ block }: AboutBlockLineProps) {
         </p>
       );
     case 'transition':
-      return <p className="text-muted mt-1">{`// ${block.text}`}</p>;
+      return <p className="text-muted mt-0.5 sm:mt-1">{`// ${block.text}`}</p>;
     case 'belief':
       return (
-        <p className="text-accent mt-2">
+        <p className="text-accent mt-1 sm:mt-2">
           {'/** '}
           {block.text}
           {' */'}
         </p>
       );
     case 'heading':
-      return <p className="text-accent mt-3 tracking-wide uppercase">{`// === ${block.text} ===`}</p>;
+      return (
+        <p className="text-accent mt-1.5 tracking-wide uppercase sm:mt-3">{`// === ${block.text} ===`}</p>
+      );
     case 'expectation':
       return (
-        <p className="text-muted mt-1">
+        <p className="text-muted mt-0.5 sm:mt-1">
           {'// - '}
           <strong className="text-foreground font-semibold">{block.title}</strong>
           {` — ${block.description}`}
@@ -834,6 +836,8 @@ export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) 
   const isVisible = useIsVisible(wrapperRef);
   const frameloop = !isVisible ? 'never' : reducedMotion ? 'demand' : 'always';
 
+  const panelRef = useRef<HTMLDivElement>(null);
+
   // Trava o scroll da página enquanto o texto está visível — ele agora vive na própria seção, não
   // num modal separado, então sem isso o usuário rolaria a página "por baixo" do texto revelado.
   useEffect(() => {
@@ -841,11 +845,30 @@ export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) 
     const scrollbarWidth = window.innerWidth - document.documentElement.clientWidth;
     const previousOverflow = document.body.style.overflow;
     const previousPaddingRight = document.body.style.paddingRight;
+    // `<html>` tem overflow-x:hidden fixo (globals.css) — isso tira o `<body>` do papel de rolador
+    // da página, então travar só o body não é mais suficiente; precisa travar o overflow-y do
+    // `<html>` também, senão a página ainda rola por baixo do painel.
+    const previousHtmlOverflowY = document.documentElement.style.overflowY;
     document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflowY = 'hidden';
     if (scrollbarWidth > 0) document.body.style.paddingRight = `${scrollbarWidth}px`;
+
+    // `overflow: hidden` no body não é suficiente em iOS Safari — o scroll "elástico" ainda
+    // consegue mover a página por baixo. Bloqueia touch/wheel fora do próprio painel (que precisa
+    // continuar rolável nele mesmo, como rede de segurança em telas bem baixas).
+    function blockOutsidePanel(event: TouchEvent | WheelEvent) {
+      if (panelRef.current?.contains(event.target as Node)) return;
+      event.preventDefault();
+    }
+    document.addEventListener('touchmove', blockOutsidePanel, { passive: false });
+    document.addEventListener('wheel', blockOutsidePanel, { passive: false });
+
     return () => {
       document.body.style.overflow = previousOverflow;
       document.body.style.paddingRight = previousPaddingRight;
+      document.documentElement.style.overflowY = previousHtmlOverflowY;
+      document.removeEventListener('touchmove', blockOutsidePanel);
+      document.removeEventListener('wheel', blockOutsidePanel);
     };
   }, [dissolved]);
 
@@ -886,17 +909,20 @@ export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) 
           localizado. */}
       <div
         onClick={() => controlsRef.current.reform()}
-        className={`fixed inset-0 z-10 flex items-center justify-center p-4 transition-opacity duration-500 sm:p-8 ${dissolved ? 'pointer-events-auto cursor-pointer opacity-100' : 'pointer-events-none opacity-0'}`}
+        className={`fixed inset-0 z-10 flex items-center justify-center p-1 transition-opacity duration-500 sm:p-8 ${dissolved ? 'pointer-events-auto cursor-pointer opacity-100' : 'pointer-events-none opacity-0'}`}
       >
         {/* O texto é bem mais longo agora (bio completa) — cabe sem rolar a página inteira em duas
-            colunas. Nada de `columns-*` (CSS multicolumn): testado e o Chromium renderiza os
-            blocos cortados/sobrepostos com esse conteúdo — em vez disso, os blocos já vêm
-            divididos em duas listas balanceadas por tamanho (splitIntoColumns) e cada uma vira uma
-            coluna comum de verdade (`grid-cols-2`). Em telas baixas o max-h + overflow-y-auto aqui
-            dentro é só uma rede de segurança; o card inteiro "emerge" de leve escala/profundidade
-            em vez de só aparecer, pra reforçar a sensação de vir de trás da explosão. */}
+            colunas, inclusive no mobile (só a partir de sm que o texto cresce e o espaçamento
+            relaxa — telas bem pequenas precisam do máximo de altura útil). Nada de `columns-*`
+            (CSS multicolumn): testado e o Chromium renderiza os blocos cortados/sobrepostos com
+            esse conteúdo — em vez disso, os blocos já vêm divididos em duas listas balanceadas por
+            tamanho (splitIntoColumns) e cada uma vira uma coluna comum de verdade (`grid-cols-2`).
+            O max-h + overflow-y-auto aqui dentro é só uma rede de segurança pra telas realmente
+            fora do comum; o card inteiro "emerge" de leve escala/profundidade em vez de só
+            aparecer, pra reforçar a sensação de vir de trás da explosão. */}
         <div
-          className={`relative max-h-[calc(100vh-2rem)] w-full max-w-5xl overflow-y-auto transition-all duration-500 ease-out-expo sm:max-h-[calc(100vh-4rem)] ${dissolved ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-6 scale-95 opacity-0'}`}
+          ref={panelRef}
+          className={`relative max-h-[calc(100vh-0.5rem)] w-full max-w-5xl overflow-y-auto transition-all duration-500 ease-out-expo sm:max-h-[calc(100vh-4rem)] ${dissolved ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-6 scale-95 opacity-0'}`}
         >
           {dissolved && (
             <button
@@ -906,20 +932,20 @@ export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) 
                 controlsRef.current.reform();
               }}
               aria-label="Voltar para a visualização do rosto"
-              className="outline-none sticky top-0 right-0 float-right -mt-1 -mr-1 mb-2 font-mono text-[10px] tracking-wide text-muted uppercase hover:text-foreground focus-visible:outline-solid focus-visible:outline-accent focus-visible:outline-2 focus-visible:outline-offset-2 sm:text-xs"
+              className="outline-none sticky top-0 right-0 float-right -mt-1 -mr-1 mb-1 font-mono text-[10px] tracking-wide text-muted uppercase hover:text-foreground focus-visible:outline-solid focus-visible:outline-accent focus-visible:outline-2 focus-visible:outline-offset-2 sm:text-xs"
             >
               Voltar ×
             </button>
           )}
 
           <p
-            className={`text-accent clear-both text-left font-mono text-[10px] transition-all duration-500 ease-out-expo sm:text-xs ${dissolved ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'}`}
+            className={`text-accent clear-both hidden text-left font-mono text-[10px] transition-all duration-500 ease-out-expo sm:block sm:text-xs ${dissolved ? 'translate-y-0 opacity-100' : 'translate-y-3 opacity-0'}`}
             style={{ transitionDelay: dissolved ? '180ms' : '0ms' }}
           >
             // sobre-mim.ts
           </p>
 
-          <div className="grid gap-x-10 text-left font-mono text-[10px] leading-relaxed sm:grid-cols-2 sm:text-xs">
+          <div className="clear-both grid grid-cols-2 gap-x-3 text-left font-mono text-[9px] leading-tight sm:clear-none sm:gap-x-10 sm:text-xs sm:leading-relaxed">
             {ABOUT_COLUMNS.map((column, columnIndex) => (
               <div key={columnIndex} className="space-y-0">
                 {column.map(({ block, index }) => (
