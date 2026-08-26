@@ -1,4 +1,4 @@
-export type SocialIconKey = 'github' | 'linkedin' | 'instagram' | 'mail';
+export type SocialIconKey = 'github' | 'linkedin' | 'instagram' | 'whatsapp' | 'mail';
 
 export interface SocialLink {
   id: string;

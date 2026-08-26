@@ -9,5 +9,6 @@ export const socialLinks: SocialLink[] = [
     href: 'https://www.instagram.com/carlos_rafael426/',
     icon: 'instagram',
   },
+  { id: 'whatsapp', label: 'WhatsApp', href: 'https://wa.me/5541995896092', icon: 'whatsapp' },
   { id: 'mail', label: 'E-mail', href: 'mailto:carlosrafael360@gmail.com', icon: 'mail' },
 ];

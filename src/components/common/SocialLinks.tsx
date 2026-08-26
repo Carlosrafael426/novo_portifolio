@@ -2,7 +2,7 @@ import { Mail } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { IconType } from 'react-icons';
 import { FaLinkedin } from 'react-icons/fa6';
-import { SiGithub, SiInstagram } from 'react-icons/si';
+import { SiGithub, SiInstagram, SiWhatsapp } from 'react-icons/si';
 import { socialLinks } from '@/data/social';
 import type { SocialIconKey } from '@/types/social';
 import { VisuallyHidden } from '@/components/ui/VisuallyHidden';
@@ -12,6 +12,7 @@ const icons: Record<SocialIconKey, IconType | LucideIcon> = {
   github: SiGithub,
   linkedin: FaLinkedin,
   instagram: SiInstagram,
+  whatsapp: SiWhatsapp,
   mail: Mail,
 };
 
