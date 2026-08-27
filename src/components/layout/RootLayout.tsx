@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router';
 import { Navbar } from '@/components/layout/Navbar';
 import { Footer } from '@/components/layout/Footer';
+import { SiteBackgroundSlot } from '@/components/common/SiteBackgroundSlot';
 
 export function RootLayout() {
   const { pathname, hash } = useLocation();
@@ -16,6 +17,7 @@ export function RootLayout() {
 
   return (
     <>
+      <SiteBackgroundSlot />
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:bg-accent focus:text-accent-foreground focus:absolute focus:top-2 focus:left-2 focus:z-(--z-skip-link) focus:rounded focus:px-4 focus:py-2"

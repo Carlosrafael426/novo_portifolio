@@ -73,7 +73,7 @@ export function ClippedPanel({
 
   return (
     <div ref={wrapperRef} className={cn('relative', wrapperClassName)}>
-      <div className={cn('p-px', pulse ? 'bg-accent/40' : 'bg-accent')} style={{ clipPath: clip }}>
+      <div className={cn('p-px', pulse ? 'bg-accent/80' : 'bg-accent')} style={{ clipPath: clip }}>
         <div className={cn('bg-background', className)} style={{ clipPath: clip }}>
           {children}
         </div>

@@ -10,7 +10,6 @@ function prefersReducedMotion(): boolean {
 
 export interface HeroIntroRefs {
   root: RefObject<HTMLElement | null>;
-  canvasWrapper: RefObject<HTMLDivElement | null>;
   introLabel: RefObject<HTMLParagraphElement | null>;
   logo: RefObject<HTMLDivElement | null>;
   phraseLine1: RefObject<HTMLSpanElement | null>;
@@ -38,7 +37,6 @@ export function useHeroIntro(): UseHeroIntroResult {
   const [shouldPlayIntro] = useState(() => !prefersReducedMotion());
 
   const root = useRef<HTMLElement>(null);
-  const canvasWrapper = useRef<HTMLDivElement>(null);
   const introLabel = useRef<HTMLParagraphElement>(null);
   const logo = useRef<HTMLDivElement>(null);
   const phraseLine1 = useRef<HTMLSpanElement>(null);
@@ -50,7 +48,6 @@ export function useHeroIntro(): UseHeroIntroResult {
 
   const refs: HeroIntroRefs = {
     root,
-    canvasWrapper,
     introLabel,
     logo,
     phraseLine1,
@@ -63,7 +60,6 @@ export function useHeroIntro(): UseHeroIntroResult {
 
   useLayoutEffect(() => {
     const revealTargets = [
-      canvasWrapper.current,
       introLabel.current,
       logo.current,
       phraseLine1.current,
@@ -101,7 +97,6 @@ export function useHeroIntro(): UseHeroIntroResult {
         .set(phraseLine2.current, { x: 32 })
         .set(tertiary.current, { x: -24 })
         .set(ctaGroup.current, { x: 24 })
-        .to(canvasWrapper.current, { opacity: 1, duration: 1.1, ease: 'sine.out' }, 0)
         // A logo "vem do fundo da tela": nasce pequena/desfocada/transparente e cresce, devagar e
         // suave, até o tamanho final — o header aparece junto, no mesmo ritmo.
         .to(logo.current, { opacity: 1, scale: 1, filter: 'blur(0px)', duration: 2.6, ease: 'sine.out' }, 0.3)

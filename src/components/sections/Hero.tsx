@@ -1,5 +1,4 @@
 import logoLimpaSrc from '@/assets/logo/logo-limpa.png';
-import { HeroCanvasSlot } from '@/components/common/HeroCanvasSlot';
 import { HeroCta } from '@/components/common/HeroCta';
 import { SystemStatus } from '@/components/common/SystemStatus';
 import { ScrollIndicator } from '@/components/common/ScrollIndicator';
@@ -13,7 +12,6 @@ export function Hero() {
   const { refs } = useHeroIntro();
   const {
     root,
-    canvasWrapper,
     introLabel,
     logo,
     phraseLine1,
@@ -31,11 +29,9 @@ export function Hero() {
       ref={root}
       className="relative flex min-h-screen scroll-mt-24 flex-col overflow-hidden px-6 pt-12 pb-28 sm:px-10 sm:pt-16 lg:px-16"
     >
-      <div ref={canvasWrapper} className="absolute inset-0">
-        <HeroCanvasSlot />
-      </div>
-
-      {/* Scrim radial sutil, centrado no conteúdo — garante contraste sem virar caixa visível. */}
+      {/* Scrim radial sutil, centrado no conteúdo — garante contraste sem virar caixa visível.
+          O fundo em si (rede de conexões) agora é global, fixo atrás do site inteiro — ver
+          SiteBackgroundSlot no RootLayout, não mais renderizado aqui dentro do Hero. */}
       <div
         aria-hidden="true"
         className="bg-radial from-background/80 via-background/25 pointer-events-none absolute inset-0 to-transparent"

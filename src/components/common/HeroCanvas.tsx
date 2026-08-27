@@ -378,10 +378,11 @@ function useIsHeroVisible(containerRef: React.RefObject<HTMLDivElement | null>):
 }
 
 /**
- * Fundo do Hero: rede de conexões (Three.js/R3F) — sem nós visíveis, só linhas que nascem e
- * morrem, com um pulso neon viajando por cada uma. Carregado via React.lazy a partir de
- * HeroCanvasSlot — isolado do bundle principal. Sem qualquer resposta ao mouse (ver memória
- * do usuário: efeitos reativos ao cursor não devem voltar a este site).
+ * Fundo do site inteiro (Three.js/R3F): rede de conexões — sem nós visíveis, só linhas que
+ * nascem e morrem, com um pulso neon viajando por cada uma. Renderizado uma única vez, fixo atrás
+ * de todas as seções via SiteBackgroundSlot no RootLayout — não é mais exclusivo do Hero, apesar
+ * do nome do arquivo. Carregado via React.lazy, isolado do bundle principal. Sem qualquer resposta
+ * ao mouse (ver memória do usuário: efeitos reativos ao cursor não devem voltar a este site).
  */
 export default function HeroCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
