@@ -35,17 +35,23 @@ interface Tier {
   dpr: number | [number, number];
 }
 
+// Contagens bem menores que antes: isso deixou de ser um flourish só do Hero (que parava de
+// renderizar assim que saía de vista) e virou o fundo do site inteiro, sempre ativo enquanto a
+// aba está visível — o custo de GPU agora é contínuo pela sessão toda, não só nos primeiros
+// segundos. Menos nós/linhas e um dpr mais baixo reduzem esse custo, e evitam a pressão de
+// composição que fazia outros elementos da página (bordas SVG dos painéis) falharem ao repintar
+// durante o scroll.
 function getPerfTier(width: number): Tier {
   const coarse = window.matchMedia('(pointer: coarse)').matches;
   const cores = navigator.hardwareConcurrency ?? 4;
 
   if (coarse || width < 768) {
-    return { nodeCount: 50, slotCount: 40, dpr: 1 };
+    return { nodeCount: 26, slotCount: 20, dpr: 1 };
   }
   if (cores >= 8 && width >= 1280) {
-    return { nodeCount: 170, slotCount: 131, dpr: [1, 1.75] };
+    return { nodeCount: 85, slotCount: 65, dpr: 1 };
   }
-  return { nodeCount: 100, slotCount: 81, dpr: [1, 1.5] };
+  return { nodeCount: 55, slotCount: 42, dpr: 1 };
 }
 
 interface NodeData {

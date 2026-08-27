@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { cn } from '@/utils/cn';
 
@@ -71,6 +71,7 @@ export function ClippedPanel({
   children,
 }: ClippedPanelProps) {
   const fallbackClip = clipPolygonFallback(corners, cut);
+  const clipId = `clipped-panel-${useId()}`;
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
 
@@ -89,10 +90,14 @@ export function ClippedPanel({
 
   const points = size ? cornerPoints(corners, cut, size.width, size.height) : null;
   const preciseClip = points ? `polygon(${points.map(([x, y]) => `${x}px ${y}px`).join(', ')})` : null;
+  const pointsAttr = points ? points.map(([x, y]) => `${x},${y}`).join(' ') : '';
 
   return (
     <div ref={wrapperRef} className={cn('relative', wrapperClassName)}>
-      <div className={cn('bg-background', className)} style={{ clipPath: preciseClip ?? fallbackClip }}>
+      <div
+        className={cn('bg-background', className)}
+        style={{ clipPath: points ? `url(#${clipId})` : fallbackClip }}
+      >
         {children}
       </div>
 
@@ -102,8 +107,22 @@ export function ClippedPanel({
           className={cn('pointer-events-none absolute inset-0', pulse ? 'text-accent/80' : 'text-accent')}
           width={size.width}
           height={size.height}
+          // Promove a borda pra sua própria camada de composição — sem isso ela pode ficar no
+          // mesmo "layer" que elementos vizinhos e ser repintada errado junto com eles durante o
+          // scroll (visto em teste com sampling de pixel real: a cor da borda some por um frame,
+          // mesmo com o DOM/CSSOM reportando tudo certo — sintoma clássico de um bug de
+          // composição de GPU, não um bug de CSS/layout).
+          style={{ transform: 'translateZ(0)' }}
         >
-          <polygon points={points.map(([x, y]) => `${x},${y}`).join(' ')} fill="none" stroke="currentColor" strokeWidth="1" />
+          {/* `clip-path: url(#...)` referenciando um <clipPath> aqui dentro, em vez de
+              `clip-path: polygon(...)` inline — no teste sob CPU throttled (simulando um
+              aparelho mais fraco) essa variante teve bem menos falhas de repintura que a
+              polygon() inline, provavelmente por passar pelo pipeline de recorte do próprio SVG
+              em vez do pipeline de máscara do CSS. */}
+          <clipPath id={clipId} clipPathUnits="userSpaceOnUse">
+            <polygon points={pointsAttr} />
+          </clipPath>
+          <polygon points={pointsAttr} fill="none" stroke="currentColor" strokeWidth="1" />
         </svg>
       ) : null}
 
