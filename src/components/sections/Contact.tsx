@@ -119,8 +119,6 @@ export function Contact() {
             <SiWhatsapp aria-hidden="true" size={18} />
             Chamar no WhatsApp
           </a>
-
-          <p className="text-muted mt-4 font-mono text-xs tracking-wide">+55 41 99589-6092</p>
         </div>
       </ClippedPanel>
     </Section>
