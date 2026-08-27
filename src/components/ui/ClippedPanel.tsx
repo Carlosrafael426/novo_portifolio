@@ -18,31 +18,49 @@ interface ClippedPanelProps {
   children: ReactNode;
 }
 
-/** Polígono responsivo (mistura % e px) — usado no clip-path das duas camadas, que já são do
- *  tamanho do próprio painel, então a resolução em % é sempre correta pra elas. */
-function clipPolygon(corners: ClippedCorners, cut: number): string {
+/** Polígono responsivo (mistura % e px) — usado só como fallback pro clip-path do conteúdo antes
+ *  do ResizeObserver medir o painel pela primeira vez (evita um frame sem recorte nenhum). */
+function clipPolygonFallback(corners: ClippedCorners, cut: number): string {
   if (corners === 'opposite') {
     return `polygon(${cut}px 0, 100% 0, 100% calc(100% - ${cut}px), calc(100% - ${cut}px) 100%, 0 100%, 0 ${cut}px)`;
   }
   return `polygon(${cut}px 0, calc(100% - ${cut}px) 0, 100% ${cut}px, 100% calc(100% - ${cut}px), calc(100% - ${cut}px) 100%, ${cut}px 100%, 0 calc(100% - ${cut}px), 0 ${cut}px)`;
 }
 
-/** Mesmo polígono, mas em px absolutos a partir do tamanho medido do painel — necessário pro
- *  offset-path do pulso, cujo elemento precisa ser pequeno (não do tamanho do painel), então não
- *  pode depender de "%" resolvendo contra o próprio box dele. */
-function clipPolygonPx(corners: ClippedCorners, cut: number, width: number, height: number): string {
+/** Os vértices do contorno cortado, em px absolutos a partir do tamanho medido do painel — usados
+ *  tanto pro clip-path do conteúdo quanto pro `points` do SVG da borda e pro `offset-path` do
+ *  pulso, sempre a partir da mesma fonte (evita qualquer desalinhamento entre eles). */
+function cornerPoints(corners: ClippedCorners, cut: number, width: number, height: number): [number, number][] {
   if (corners === 'opposite') {
-    return `polygon(${cut}px 0, ${width}px 0, ${width}px ${height - cut}px, ${width - cut}px ${height}px, 0 ${height}px, 0 ${cut}px)`;
+    return [
+      [cut, 0],
+      [width, 0],
+      [width, height - cut],
+      [width - cut, height],
+      [0, height],
+      [0, cut],
+    ];
   }
-  return `polygon(${cut}px 0, ${width - cut}px 0, ${width}px ${cut}px, ${width}px ${height - cut}px, ${width - cut}px ${height}px, ${cut}px ${height}px, 0 ${height - cut}px, 0 ${cut}px)`;
+  return [
+    [cut, 0],
+    [width - cut, 0],
+    [width, cut],
+    [width, height - cut],
+    [width - cut, height],
+    [cut, height],
+    [0, height - cut],
+    [0, cut],
+  ];
 }
 
 /**
- * Painel com cantos cortados em diagonal (visual "HUD"/painel técnico) — a borda de 1px vem de
- * duas camadas recortadas com o mesmo polígono (a de fora um pouco maior), já que `clip-path`
- * sozinho não desenha borda ao longo da diagonal cortada. Por cima, um pulso neon percorre esse
- * mesmo contorno via `offset-path` — mesma linguagem visual do pulso que viaja pelas linhas do
- * fundo do Hero (base contínua discreta + trecho brilhante em movimento), não um ponto isolado.
+ * Painel com cantos cortados em diagonal (visual "HUD"/painel técnico). A borda é desenhada por
+ * um `<svg><polygon>` com stroke, não mais por duas camadas de `clip-path` sobrepostas com 1px de
+ * padding entre elas — essa técnica anterior se mostrou instável no Chromium (bordas e cantos
+ * inteiros somem intermitentemente durante o scroll/repaint, sem nenhuma animação envolvida). Um
+ * único `<polygon>` com stroke é uma técnica bem mais estabelecida, sem depender de duas camadas
+ * ficarem pixel-perfeitamente sincronizadas a cada repintura. Por cima, um pulso neon percorre o
+ * mesmo contorno via `offset-path`.
  */
 export function ClippedPanel({
   corners = 'all',
@@ -52,13 +70,11 @@ export function ClippedPanel({
   className,
   children,
 }: ClippedPanelProps) {
-  const clip = clipPolygon(corners, cut);
+  const fallbackClip = clipPolygonFallback(corners, cut);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
-    if (!pulse) return;
-
     const element = wrapperRef.current;
     if (!element) return;
 
@@ -69,15 +85,28 @@ export function ClippedPanel({
     observer.observe(element);
 
     return () => observer.disconnect();
-  }, [pulse]);
+  }, []);
+
+  const points = size ? cornerPoints(corners, cut, size.width, size.height) : null;
+  const preciseClip = points ? `polygon(${points.map(([x, y]) => `${x}px ${y}px`).join(', ')})` : null;
 
   return (
     <div ref={wrapperRef} className={cn('relative', wrapperClassName)}>
-      <div className={cn('p-px', pulse ? 'bg-accent/80' : 'bg-accent')} style={{ clipPath: clip }}>
-        <div className={cn('bg-background', className)} style={{ clipPath: clip }}>
-          {children}
-        </div>
+      <div className={cn('bg-background', className)} style={{ clipPath: preciseClip ?? fallbackClip }}>
+        {children}
       </div>
+
+      {points && size ? (
+        <svg
+          aria-hidden="true"
+          className={cn('pointer-events-none absolute inset-0', pulse ? 'text-accent/80' : 'text-accent')}
+          width={size.width}
+          height={size.height}
+        >
+          <polygon points={points.map(([x, y]) => `${x},${y}`).join(' ')} fill="none" stroke="currentColor" strokeWidth="1" />
+        </svg>
+      ) : null}
+
       {/* Fora da camada com clip-path — assim o brilho do pulso não é cortado pelo contorno e
           aparece pros dois lados da borda (pra dentro e pra fora). O elemento em si fica no
           tamanho de 1px (não do tamanho do painel): como `offset-rotate: auto` gira o próprio
@@ -87,12 +116,12 @@ export function ClippedPanel({
           a tangente muda de direção de forma abrupta e o Chromium chega a desenhar um frame com a
           rotação dessincronizada da posição — o pulso "sumia" bem no canto. Um brilho redondo (sem
           direção) não depende de rotação nenhuma, então não tem esse ponto de falha. */}
-      {pulse && size ? (
+      {pulse && preciseClip ? (
         <div
           aria-hidden="true"
           className="animate-border-travel motion-reduce:animate-none pointer-events-none absolute top-0 left-0 h-px w-px"
           style={{
-            offsetPath: clipPolygonPx(corners, cut, size.width, size.height),
+            offsetPath: preciseClip,
             offsetAnchor: '0 0',
             offsetDistance: '0%',
           }}
