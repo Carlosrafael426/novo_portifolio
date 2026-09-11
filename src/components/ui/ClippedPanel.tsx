@@ -121,14 +121,16 @@ export function ClippedPanel({
           // um estiramento proporcional suave, nunca uma borda cortada.
           viewBox={`0 0 ${size.width} ${size.height}`}
           preserveAspectRatio="none"
-          // Promove a borda pra sua própria camada de composição — sem isso ela pode ficar no
-          // mesmo "layer" que elementos vizinhos e ser repintada errado junto com eles durante o
-          // scroll (visto em teste com sampling de pixel real: a cor da borda some por um frame,
-          // mesmo com o DOM/CSSOM reportando tudo certo — sintoma clássico de um bug de
-          // composição de GPU, não um bug de CSS/layout).
-          style={{ transform: 'translateZ(0)' }}
+          // O polígono toca exatamente as bordas do viewBox (x=0/width, y=0/height) — um stroke
+          // centrado ali tem METADE da sua espessura fora da caixa do SVG, que por padrão recorta
+          // (`overflow: hidden`) o que passa do viewBox. Isso deixava a borda inteira com só ~50%
+          // da cobertura real (diluída pelo anti-aliasing em cima disso), sumindo de vez em quando
+          // dependendo do contraste local de cada lado — sem ter nada a ver com GPU/composição
+          // (aceleração de hardware desligada não mudava nada, confirmado por teste real).
+          // `overflow: visible` deixa o stroke pintar inteiro, mesmo passando do viewBox.
+          style={{ overflow: 'visible' }}
         >
-          <polygon points={pointsAttr} fill="none" stroke="currentColor" strokeWidth="1" />
+          <polygon points={pointsAttr} fill="none" stroke="currentColor" strokeWidth="1.5" />
         </svg>
       ) : null}
 
