@@ -4,20 +4,29 @@ import * as THREE from 'three';
 import { gsap } from 'gsap';
 import { aboutContent } from '@/data/about';
 import type { RichText } from '@/types/about';
-import headMeshJson from '@/assets/face/head-mesh.json';
+import headImageUrl from '@/assets/face/head-3d.webp';
 
 const ACCENT_HEX = '#c6ff45';
 const ACCENT_COLOR = new THREE.Color(ACCENT_HEX);
 
-interface HeadMeshData {
-  /** 1.601 × 3 floats: x, y, z de cada vértice, já centrados na origem e escalados pra 2 de altura. */
-  nodes: number[];
-  /** 4.797 × 2 ints: pares de índice formando cada aresta única do wireframe. */
-  edges: number[];
-}
-const headMesh = headMeshJson as HeadMeshData;
+// Amostragem da imagem: cada pixel aceso vira uma partícula. O passo controla a densidade — 2
+// significa "olhe 1 pixel a cada 2, nos dois eixos". Abaixo do limiar o pixel é fundo e é
+// descartado. O teto existe porque cada partícula custa escrita por frame durante a explosão.
+const SAMPLE_STEP = 2;
+const SAMPLE_THRESHOLD = 26;
+const MAX_PARTICLES = 48000;
+const MOBILE_MAX_PARTICLES = 22000;
 
-const POINT_SIZE = 0.042;
+// O brilho do pixel vira opacidade, mas não linearmente: as linhas finas da imagem são bem
+// escuras (anti-aliasing as dilui), e cru elas sumiriam. A raiz levanta os tons baixos sem
+// estourar os altos, e o piso garante que nenhuma partícula amostrada fique invisível.
+const ALPHA_FLOOR = 0.3;
+
+// Acima disso o pixel é um "nó" da malha (os pontos brilhantes da imagem), não linha: ganha
+// tamanho maior e entra no sorteio da cintilância.
+const STAR_THRESHOLD = 168;
+
+const POINT_SIZE = 0.017;
 const POINT_SPRITE_SIZE = 64;
 
 // Enquadramento: a cabeça (y de 0 a 1 na malha) ocupa o miolo da tela e os ombros ficam cortados
@@ -39,14 +48,10 @@ function groupYOffset(scale: number): number {
 // linhas são baratos; o que custa é área pintada, e isso o tamanho do ponto resolve.
 const MOBILE_POINT_SIZE_FACTOR = 0.75;
 
-// A cabeça é fechada (z de -0.65 a 0.65), então existe um lado de trás de verdade: pontos e
-// arestas da frente acendem mais que os de trás. Sem isso a nuca aparece com o mesmo peso do
-// rosto e a leitura vira confusão — mas some por completo também não pode, porque a
-// transparência do wireframe (enxergar o outro lado) faz parte do visual.
-const ALPHA_BACK = 0.55;
-const ALPHA_FRONT = 1;
-const LINE_ALPHA_BACK = 0.22;
-const LINE_ALPHA_FRONT = 0.68;
+// A imagem é plana, então cada partícula ganha um Z aleatório pequeno. Não é profundidade real —
+// serve pra que o leve giro com o mouse produza parallax (camadas deslizando entre si) em vez de
+// parecer um cartão girando.
+const DEPTH_SPREAD = 0.14;
 
 // Enquanto o texto está visível, os estilhaços não somem — recuam pra essa fração da opacidade
 // de repouso e continuam à deriva atrás do texto, como plano de fundo vivo.
@@ -54,7 +59,6 @@ const DISSOLVED_ALPHA_FACTOR = 0.28;
 
 // Cintilância: parte dos vértices pulsa de brilho, virando as "estrelas" mais fortes do wireframe.
 // Brilho pulsando lê como malha viva; oscilar posição leria como tremor.
-const TWINKLE_FRACTION = 0.16;
 const TWINKLE_AMPLITUDE = 0.5;
 const TWINKLE_SPEED_MIN = 0.6;
 const TWINKLE_SPEED_MAX = 1.8;
@@ -69,10 +73,11 @@ const DRIFT_FREQ_X = 0.09;
 const DRIFT_FREQ_Y = 0.07;
 const DRIFT_FREQ_Z = 0.06;
 
-// Rotação acompanhando o mouse (só desktop com ponteiro fino). Agora que a cabeça é fechada e
-// tem volume de verdade, girar mais compensa: mostra que é um objeto 3D, não um recorte.
-const MAX_ROTATE_Y = 24;
-const MAX_ROTATE_X = 10;
+// Rotação acompanhando o mouse (só desktop com ponteiro fino). Curta de propósito: o desenho é
+// plano, então giro grande denunciaria o cartão. O que se quer aqui é só o parallax entre as
+// camadas de Z.
+const MAX_ROTATE_Y = 7;
+const MAX_ROTATE_X = 3.5;
 const ROTATE_RANGE_PX = 420;
 const ROTATE_DAMPING = 0.06;
 
@@ -81,38 +86,40 @@ const EXPLODE_NODE_MAX_DELAY = 0.25;
 const EXPLODE_TOTAL = EXPLODE_NODE_DURATION + EXPLODE_NODE_MAX_DELAY;
 const EXPLODE_PUSH_MIN = 1.6;
 const EXPLODE_PUSH_MAX = 4.5;
-// As arestas apagam bem antes dos pontos terminarem de voar: esticadas até o fim da dispersão,
-// elas viram um emaranhado de linhas atravessando a seção inteira. Some cedo, e o que resta é o
-// campo de estrelas.
-const EXPLODE_LINES_DURATION = 0.3;
 
 const REFORM_NODE_DURATION = 0.8;
 const REFORM_NODE_MAX_DELAY = 0.2;
 const REFORM_TOTAL = REFORM_NODE_DURATION + REFORM_NODE_MAX_DELAY;
-// Na volta as linhas só reaparecem depois que os pontos já estão quase no lugar, senão elas
-// reaparecem esticadas.
-const REFORM_LINES_DELAY = 0.55;
-const REFORM_LINES_DURATION = 0.45;
 
 const easeExplode = gsap.parseEase('power2.out');
 const easeReform = gsap.parseEase('power3.out');
-const easeLines = gsap.parseEase('power1.out');
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
 
-interface HeadNode {
-  baseX: number;
-  baseY: number;
-  baseZ: number;
-  x: number;
-  y: number;
-  z: number;
-}
-
-function makeNode(x: number, y: number, z: number): HeadNode {
-  return { baseX: x, baseY: y, baseZ: z, x, y, z };
+/**
+ * Partículas em arrays paralelos, não num array de objetos. São dezenas de milhares delas, e a
+ * explosão reescreve todas as posições a cada frame — com objetos isso vira pressão de GC e
+ * acesso espalhado pela memória.
+ */
+interface Particles {
+  count: number;
+  baseX: Float32Array;
+  baseY: Float32Array;
+  baseZ: Float32Array;
+  x: Float32Array;
+  y: Float32Array;
+  z: Float32Array;
+  /** Opacidade de repouso, vinda do brilho do pixel na imagem. */
+  alpha: Float32Array;
+  isTwinkle: Uint8Array;
+  phase: Float32Array;
+  speed: Float32Array;
+  /** Índices separados por tamanho de desenho: nós brilhantes vs. pixels de linha. */
+  starIndices: Uint32Array;
+  plainIndices: Uint32Array;
+  centroid: THREE.Vector3;
 }
 
 function isFinePointer(): boolean {
@@ -157,96 +164,111 @@ function getPointSprite(): THREE.CanvasTexture {
   return pointSprite;
 }
 
-/** Monta vértices e arestas a partir da malha fixa, inteira: a topologia do wireframe não pode ser
- *  reduzida em runtime sem rasgar a malha. */
-function buildMeshNodeSet() {
-  const totalNodes = headMesh.nodes.length / 3;
+/**
+ * Transforma a imagem de referência num campo de partículas: cada pixel aceso vira um ponto, na
+ * mesma posição relativa que ocupava na imagem. É por isso que o desenho sai idêntico à
+ * referência — a forma não é recriada, é lida dela.
+ *
+ * A varredura desenha a imagem num canvas fora de tela e lê os pixels de volta. Roda uma vez, no
+ * chunk preguiçoso da seção Sobre.
+ */
+async function sampleImage(url: string, maxParticles: number): Promise<Particles> {
+  const image = new Image();
+  image.decoding = 'async';
+  image.src = url;
+  await image.decode();
 
-  const nodes: HeadNode[] = [];
-  let zMin = Infinity;
-  let zMax = -Infinity;
-  for (let i = 0; i < totalNodes; i++) {
-    const x = headMesh.nodes[i * 3];
-    const y = headMesh.nodes[i * 3 + 1];
-    const z = headMesh.nodes[i * 3 + 2];
-    if (z < zMin) zMin = z;
-    if (z > zMax) zMax = z;
-    nodes.push(makeNode(x, y, z));
+  const canvas = document.createElement('canvas');
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('2D context indisponível para amostrar a imagem do rosto');
+  context.drawImage(image, 0, 0);
+  const { data, width, height } = context.getImageData(0, 0, canvas.width, canvas.height);
+
+  // Primeira passada: quantos pixels passam do limiar. Precisa ser antes de alocar, pra saber o
+  // fator de descarte e já dimensionar os arrays certos.
+  let candidates = 0;
+  for (let y = 0; y < height; y += SAMPLE_STEP) {
+    for (let x = 0; x < width; x += SAMPLE_STEP) {
+      if (data[(y * width + x) * 4 + 1] >= SAMPLE_THRESHOLD) candidates++;
+    }
   }
 
-  const connections: Array<[number, number]> = [];
-  for (let i = 0; i < headMesh.edges.length; i += 2) {
-    connections.push([headMesh.edges[i], headMesh.edges[i + 1]]);
+  const keepRate = candidates > maxParticles ? maxParticles / candidates : 1;
+  const count = Math.min(candidates, maxParticles);
+
+  const baseX = new Float32Array(count);
+  const baseY = new Float32Array(count);
+  const baseZ = new Float32Array(count);
+  const alpha = new Float32Array(count);
+  const isTwinkle = new Uint8Array(count);
+  const phase = new Float32Array(count);
+  const speed = new Float32Array(count);
+
+  // Normaliza pra altura 2 (mesma convenção do resto da cena), largura proporcional.
+  const scale = 2 / height;
+  const halfW = (width * scale) / 2;
+
+  const starList: number[] = [];
+  const plainList: number[] = [];
+  let i = 0;
+  let carry = 0;
+  let sumX = 0;
+  let sumY = 0;
+
+  for (let y = 0; y < height && i < count; y += SAMPLE_STEP) {
+    for (let x = 0; x < width && i < count; x += SAMPLE_STEP) {
+      const green = data[(y * width + x) * 4 + 1];
+      if (green < SAMPLE_THRESHOLD) continue;
+
+      // Descarte uniforme por acumulador em vez de sorteio: mantém a densidade pareja pela imagem
+      // inteira, sem abrir buracos onde a sorte não ajudou.
+      carry += keepRate;
+      if (carry < 1) continue;
+      carry -= 1;
+
+      const px = x * scale - halfW;
+      const py = 1 - y * scale;
+      baseX[i] = px;
+      baseY[i] = py;
+      baseZ[i] = (Math.random() - 0.5) * DEPTH_SPREAD;
+      alpha[i] = Math.min(1, ALPHA_FLOOR + Math.sqrt(green / 255) * (1 - ALPHA_FLOOR));
+      sumX += px;
+      sumY += py;
+
+      if (green >= STAR_THRESHOLD) {
+        starList.push(i);
+        isTwinkle[i] = 1;
+        phase[i] = Math.random() * Math.PI * 2;
+        speed[i] = TWINKLE_SPEED_MIN + Math.random() * (TWINKLE_SPEED_MAX - TWINKLE_SPEED_MIN);
+      } else {
+        plainList.push(i);
+      }
+
+      i++;
+    }
   }
 
-  return { nodes, connections, zMin, zMax };
+  return {
+    count: i,
+    baseX,
+    baseY,
+    baseZ,
+    x: baseX.slice(),
+    y: baseY.slice(),
+    z: baseZ.slice(),
+    alpha,
+    isTwinkle,
+    phase,
+    speed,
+    starIndices: Uint32Array.from(starList),
+    plainIndices: Uint32Array.from(plainList),
+    centroid: new THREE.Vector3(sumX / (i || 1), sumY / (i || 1), 0),
+  };
 }
 
-/** Alpha de repouso por profundidade: frente acesa, nuca recuada — mas nunca zerada, porque
- *  enxergar o outro lado através do wireframe faz parte do visual. */
-function buildNodeAlpha(nodes: HeadNode[], zMin: number, zMax: number): number[] {
-  const span = zMax - zMin || 1;
-  return nodes.map((node) => {
-    const depth = (node.baseZ - zMin) / span;
-    return lerp(ALPHA_BACK, ALPHA_FRONT, depth);
-  });
-}
-
-interface TwinkleData {
-  /** 1 nos vértices que cintilam (desenhados maiores, viram os nós brilhantes), 0 no resto. */
-  isTwinkle: Uint8Array;
-  phase: Float32Array;
-  speed: Float32Array;
-}
-
-/** Sorteia quais vértices cintilam, com fase e velocidade próprias pra não pulsarem em bloco. */
-function buildTwinkle(nodeCount: number): TwinkleData {
-  const isTwinkle = new Uint8Array(nodeCount);
-  const phase = new Float32Array(nodeCount);
-  const speed = new Float32Array(nodeCount);
-
-  // Fisher-Yates parcial: sorteia sem repetir, sem embaralhar a lista inteira.
-  const pool = Array.from({ length: nodeCount }, (_, i) => i);
-  const count = Math.round(nodeCount * TWINKLE_FRACTION);
-  for (let i = 0; i < count; i++) {
-    const pick = i + Math.floor(Math.random() * (pool.length - i));
-    const nodeIndex = pool[pick];
-    pool[pick] = pool[i];
-    pool[i] = nodeIndex;
-
-    isTwinkle[nodeIndex] = 1;
-    phase[nodeIndex] = Math.random() * Math.PI * 2;
-    speed[nodeIndex] = TWINKLE_SPEED_MIN + Math.random() * (TWINKLE_SPEED_MAX - TWINKLE_SPEED_MIN);
-  }
-
-  return { isTwinkle, phase, speed };
-}
-
-/** Centro de massa de verdade, não o (0,0,0) da malha: explodir a partir do centroide espalha os
- *  vértices de forma coerente ao redor de um ponto só. */
-function computeCentroid(nodes: HeadNode[]): THREE.Vector3 {
-  const sum = new THREE.Vector3();
-  for (const node of nodes) sum.add(new THREE.Vector3(node.baseX, node.baseY, node.baseZ));
-  return sum.divideScalar(nodes.length || 1);
-}
-
-function buildFace() {
-  const { nodes, connections, zMin, zMax } = buildMeshNodeSet();
-  const nodeAlpha = buildNodeAlpha(nodes, zMin, zMax);
-  const twinkle = buildTwinkle(nodes.length);
-  const centroid = computeCentroid(nodes);
-
-  // Dois grupos porque `PointsMaterial` tem um `size` só: os vértices que cintilam precisam ser
-  // desenhados maiores, então vão num `points` próprio em vez de um tamanho por vértice (que
-  // exigiria shader custom).
-  const starIndices: number[] = [];
-  const plainIndices: number[] = [];
-  nodes.forEach((_, i) => (twinkle.isTwinkle[i] ? starIndices : plainIndices).push(i));
-
-  return { nodes, connections, nodeAlpha, twinkle, starIndices, plainIndices, zMin, zMax, centroid };
-}
-
-type FaceData = ReturnType<typeof buildFace>;
+type FaceData = Particles;
 type Mode = 'idle' | 'dissolved' | 'transitioning';
 
 interface FaceControls {
@@ -266,7 +288,7 @@ interface HeadSceneProps {
 }
 
 function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine, coarse, onDissolvedChange }: HeadSceneProps) {
-  const { nodes, connections, nodeAlpha, twinkle, starIndices, plainIndices, zMin, zMax, centroid } = data;
+  const { starIndices, plainIndices, centroid } = data;
   const invalidate = useThree((state) => state.invalidate);
   const pointSize = coarse ? POINT_SIZE * MOBILE_POINT_SIZE_FACTOR : POINT_SIZE;
   const headScale = coarse ? MOBILE_HEAD_SCALE : HEAD_SCALE;
@@ -274,71 +296,33 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
   const groupRef = useRef<THREE.Group>(null);
   const plainGeometryRef = useRef<THREE.BufferGeometry>(null);
   const starGeometryRef = useRef<THREE.BufferGeometry>(null);
-  const linesGeometryRef = useRef<THREE.BufferGeometry>(null);
-  const linesMaterialRef = useRef<THREE.LineBasicMaterial>(null);
 
   // Fator de estado único: 1 em repouso, DISSOLVED_ALPHA_FACTOR com a bio aberta. O GSAP tweena
   // *este número*, nunca o atributo de cor — ver writeAttributes, que é o único escritor de alpha.
   const stateFactorRef = useRef(1);
-  // As linhas têm um fator próprio porque apagam bem mais rápido que os pontos na explosão.
-  const lineFadeRef = useRef(1);
 
   const buffers = useMemo(() => {
-    const plainPositions = new Float32Array(plainIndices.length * 3);
-    const plainColors = new Float32Array(plainIndices.length * 4);
-    const starPositions = new Float32Array(starIndices.length * 3);
-    const starColors = new Float32Array(starIndices.length * 4);
-    const linePositions = new Float32Array(connections.length * 2 * 3);
-    const lineColors = new Float32Array(connections.length * 2 * 4);
-
-    function fillGroup(indices: number[], positions: Float32Array, colors: Float32Array) {
-      indices.forEach((nodeIndex, i) => {
-        const node = nodes[nodeIndex];
-        positions[i * 3] = node.x;
-        positions[i * 3 + 1] = node.y;
-        positions[i * 3 + 2] = node.z;
+    function makeGroup(indices: Uint32Array) {
+      const positions = new Float32Array(indices.length * 3);
+      const colors = new Float32Array(indices.length * 4);
+      for (let i = 0; i < indices.length; i++) {
+        const p = indices[i];
+        positions[i * 3] = data.baseX[p];
+        positions[i * 3 + 1] = data.baseY[p];
+        positions[i * 3 + 2] = data.baseZ[p];
         colors[i * 4] = ACCENT_COLOR.r;
         colors[i * 4 + 1] = ACCENT_COLOR.g;
         colors[i * 4 + 2] = ACCENT_COLOR.b;
-        colors[i * 4 + 3] = nodeAlpha[nodeIndex];
-      });
-    }
-    fillGroup(plainIndices, plainPositions, plainColors);
-    fillGroup(starIndices, starPositions, starColors);
-
-    // Posição inicial das linhas precisa vir preenchida daqui: em repouso o writeAttributes não
-    // reescreve posições (nada se move), então sem isso as arestas nasceriam degeneradas na origem
-    // e só apareceriam depois da primeira explosão.
-    //
-    // A cor delas é escrita uma vez só: a variação por profundidade é estática, e o escurecimento
-    // de estado entra depois via `material.opacity` (que multiplica o alpha do vértice) — bem mais
-    // barato que reescrever ~9.600 alphas por frame.
-    const span = zMax - zMin || 1;
-    connections.forEach(([a, b], i) => {
-      for (const [slot, nodeIndex] of [
-        [0, a],
-        [1, b],
-      ] as const) {
-        const node = nodes[nodeIndex];
-        const vertex = i * 2 + slot;
-        linePositions[vertex * 3] = node.x;
-        linePositions[vertex * 3 + 1] = node.y;
-        linePositions[vertex * 3 + 2] = node.z;
-
-        const at = vertex * 4;
-        const depth = (node.baseZ - zMin) / span;
-        lineColors[at] = ACCENT_COLOR.r;
-        lineColors[at + 1] = ACCENT_COLOR.g;
-        lineColors[at + 2] = ACCENT_COLOR.b;
-        lineColors[at + 3] = lerp(LINE_ALPHA_BACK, LINE_ALPHA_FRONT, depth);
+        colors[i * 4 + 3] = data.alpha[p];
       }
-    });
+      return { positions, colors };
+    }
 
-    return { plainPositions, plainColors, starPositions, starColors, linePositions, lineColors };
-  }, [nodes, connections, nodeAlpha, starIndices, plainIndices, zMin, zMax]);
+    return { plain: makeGroup(plainIndices), star: makeGroup(starIndices) };
+  }, [data, plainIndices, starIndices]);
 
   useEffect(() => {
-    for (const geometry of [plainGeometryRef.current, starGeometryRef.current, linesGeometryRef.current]) {
+    for (const geometry of [plainGeometryRef.current, starGeometryRef.current]) {
       const position = geometry?.attributes.position;
       if (position instanceof THREE.BufferAttribute) position.setUsage(THREE.DynamicDrawUsage);
       const color = geometry?.attributes.color;
@@ -348,7 +332,8 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
 
   const rotation = useRef({ x: 0, y: 0 });
   const pointer = useRef({ x: 0, y: 0, active: false });
-  const explodedTargetsRef = useRef<THREE.Vector3[] | null>(null);
+  /** Destinos da explosão em array plano (x,y,z por partícula), pelo mesmo motivo dos demais. */
+  const explodedTargetsRef = useRef<Float32Array | null>(null);
 
   useEffect(() => {
     if (!fine || reducedMotion) return;
@@ -376,24 +361,30 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
   function writeAttributes(elapsed: number, writePositions: boolean) {
     const stateFactor = stateFactorRef.current;
 
-    function writeGroup(indices: number[], geometry: THREE.BufferGeometry | null) {
+    function writeGroup(indices: Uint32Array, geometry: THREE.BufferGeometry | null) {
       if (!geometry) return;
       const position = geometry.attributes.position as THREE.BufferAttribute;
       const color = geometry.attributes.color as THREE.BufferAttribute;
+      // Escreve direto no array subjacente: `setXYZ`/`setW` custam caro repetidos dezenas de
+      // milhares de vezes por frame.
+      const positions = position.array as Float32Array;
+      const colors = color.array as Float32Array;
 
-      indices.forEach((nodeIndex, i) => {
+      for (let i = 0; i < indices.length; i++) {
+        const p = indices[i];
+
         if (writePositions) {
-          const node = nodes[nodeIndex];
-          position.setXYZ(i, node.x, node.y, node.z);
+          positions[i * 3] = data.x[p];
+          positions[i * 3 + 1] = data.y[p];
+          positions[i * 3 + 2] = data.z[p];
         }
 
-        let alpha = nodeAlpha[nodeIndex] * stateFactor;
-        if (!reducedMotion && twinkle.isTwinkle[nodeIndex]) {
-          const pulse = Math.sin(elapsed * twinkle.speed[nodeIndex] + twinkle.phase[nodeIndex]);
-          alpha *= 1 + TWINKLE_AMPLITUDE * pulse;
+        let alpha = data.alpha[p] * stateFactor;
+        if (!reducedMotion && data.isTwinkle[p]) {
+          alpha *= 1 + TWINKLE_AMPLITUDE * Math.sin(elapsed * data.speed[p] + data.phase[p]);
         }
-        color.setW(i, Math.max(0, Math.min(1, alpha)));
-      });
+        colors[i * 4 + 3] = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
+      }
 
       if (writePositions) position.needsUpdate = true;
       color.needsUpdate = true;
@@ -401,23 +392,6 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
 
     writeGroup(plainIndices, plainGeometryRef.current);
     writeGroup(starIndices, starGeometryRef.current);
-
-    // As linhas só precisam das posições: a cor delas é estática e o estado entra pela opacidade
-    // do material, aplicada abaixo.
-    if (writePositions) {
-      const linePosition = linesGeometryRef.current?.attributes.position as THREE.BufferAttribute | undefined;
-      if (linePosition) {
-        connections.forEach(([a, b], i) => {
-          const na = nodes[a];
-          const nb = nodes[b];
-          linePosition.setXYZ(i * 2, na.x, na.y, na.z);
-          linePosition.setXYZ(i * 2 + 1, nb.x, nb.y, nb.z);
-        });
-        linePosition.needsUpdate = true;
-      }
-    }
-
-    if (linesMaterialRef.current) linesMaterialRef.current.opacity = lineFadeRef.current;
   }
 
   useFrame((state) => {
@@ -455,53 +429,48 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
       // congelarem no ponto exato onde a explosão parou.
       const targets = explodedTargetsRef.current;
       if (targets) {
-        nodes.forEach((node, i) => {
-          const target = targets[i];
-          node.x = target.x + Math.sin(elapsed * DRIFT_FREQ_X + i) * DRIFT_AMPLITUDE;
-          node.y = target.y + Math.cos(elapsed * DRIFT_FREQ_Y + i * 1.3) * DRIFT_AMPLITUDE;
-          node.z = target.z + Math.sin(elapsed * DRIFT_FREQ_Z + i * 0.7) * DRIFT_AMPLITUDE;
-        });
+        for (let i = 0; i < data.count; i++) {
+          data.x[i] = targets[i * 3] + Math.sin(elapsed * DRIFT_FREQ_X + i) * DRIFT_AMPLITUDE;
+          data.y[i] = targets[i * 3 + 1] + Math.cos(elapsed * DRIFT_FREQ_Y + i * 1.3) * DRIFT_AMPLITUDE;
+          data.z[i] = targets[i * 3 + 2] + Math.sin(elapsed * DRIFT_FREQ_Z + i * 0.7) * DRIFT_AMPLITUDE;
+        }
 
         writeAttributes(elapsed, true);
       }
     } else if (mode === 'transitioning') {
-      // O GSAP já mutou node.x/y/z e stateFactorRef neste frame; aqui só transcrevemos pra GPU.
+      // O GSAP já mutou as posições e o stateFactor neste frame; aqui só transcrevemos pra GPU.
       writeAttributes(elapsed, true);
     }
   });
 
   useEffect(() => {
-    function applyExplodeFrame(t: number, delays: number[], targets: THREE.Vector3[]) {
+    function applyExplodeFrame(t: number, delays: Float32Array, targets: Float32Array) {
       const globalTime = t * EXPLODE_TOTAL;
 
-      nodes.forEach((node, i) => {
+      for (let i = 0; i < data.count; i++) {
         const localT = Math.max(0, Math.min(1, (globalTime - delays[i]) / EXPLODE_NODE_DURATION));
         const eased = easeExplode(localT);
-        node.x = lerp(node.baseX, targets[i].x, eased);
-        node.y = lerp(node.baseY, targets[i].y, eased);
-        node.z = lerp(node.baseZ, targets[i].z, eased);
-      });
+        data.x[i] = lerp(data.baseX[i], targets[i * 3], eased);
+        data.y[i] = lerp(data.baseY[i], targets[i * 3 + 1], eased);
+        data.z[i] = lerp(data.baseZ[i], targets[i * 3 + 2], eased);
+      }
 
-      // Só os fatores de estado: a escrita no atributo é do writeAttributes, via useFrame.
+      // Só o fator de estado: a escrita no atributo é do writeAttributes, via useFrame.
       stateFactorRef.current = lerp(1, DISSOLVED_ALPHA_FACTOR, easeExplode(t));
-      const lineT = Math.max(0, Math.min(1, globalTime / EXPLODE_LINES_DURATION));
-      lineFadeRef.current = lerp(1, 0, easeLines(lineT));
     }
 
-    function applyReformFrame(t: number, delays: number[], starts: THREE.Vector3[]) {
+    function applyReformFrame(t: number, delays: Float32Array, starts: Float32Array) {
       const globalTime = t * REFORM_TOTAL;
 
-      nodes.forEach((node, i) => {
+      for (let i = 0; i < data.count; i++) {
         const localT = Math.max(0, Math.min(1, (globalTime - delays[i]) / REFORM_NODE_DURATION));
         const eased = easeReform(localT);
-        node.x = lerp(starts[i].x, node.baseX, eased);
-        node.y = lerp(starts[i].y, node.baseY, eased);
-        node.z = lerp(starts[i].z, node.baseZ, eased);
-      });
+        data.x[i] = lerp(starts[i * 3], data.baseX[i], eased);
+        data.y[i] = lerp(starts[i * 3 + 1], data.baseY[i], eased);
+        data.z[i] = lerp(starts[i * 3 + 2], data.baseZ[i], eased);
+      }
 
       stateFactorRef.current = lerp(DISSOLVED_ALPHA_FACTOR, 1, easeReform(t));
-      const lineT = Math.max(0, Math.min(1, (globalTime - REFORM_LINES_DELAY) / REFORM_LINES_DURATION));
-      lineFadeRef.current = lerp(0, 1, easeLines(lineT));
     }
 
     // Sem animação (usado só em prefers-reduced-motion): aplica o estado final na hora, sem tween
@@ -510,7 +479,6 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
     // caminho o frameloop é 'demand', então sem ele a mudança nunca vira pixel.
     function applyInstantState(dimmed: boolean) {
       stateFactorRef.current = dimmed ? DISSOLVED_ALPHA_FACTOR : 1;
-      lineFadeRef.current = dimmed ? 0 : 1;
       writeAttributes(0, true);
       invalidate();
     }
@@ -526,19 +494,20 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
         return;
       }
 
-      const delays = nodes.map(() => Math.random() * EXPLODE_NODE_MAX_DELAY);
-      const targets = nodes.map((node) => {
-        const dx = node.baseX - centroid.x;
-        const dy = node.baseY - centroid.y;
-        const dz = node.baseZ - centroid.z;
+      const delays = new Float32Array(data.count);
+      const targets = new Float32Array(data.count * 3);
+      for (let i = 0; i < data.count; i++) {
+        delays[i] = Math.random() * EXPLODE_NODE_MAX_DELAY;
+
+        const dx = data.baseX[i] - centroid.x;
+        const dy = data.baseY[i] - centroid.y;
+        const dz = data.baseZ[i] - centroid.z;
         const dist = Math.hypot(dx, dy, dz) || 1;
         const push = EXPLODE_PUSH_MIN + Math.random() * (EXPLODE_PUSH_MAX - EXPLODE_PUSH_MIN);
-        return new THREE.Vector3(
-          node.baseX + (dx / dist) * push,
-          node.baseY + (dy / dist) * push,
-          node.baseZ + (dz / dist) * push,
-        );
-      });
+        targets[i * 3] = data.baseX[i] + (dx / dist) * push;
+        targets[i * 3 + 1] = data.baseY[i] + (dy / dist) * push;
+        targets[i * 3 + 2] = data.baseZ[i] + (dz / dist) * push;
+      }
 
       const driver = { t: 0 };
       gsap.to(driver, {
@@ -549,7 +518,6 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
         onComplete: () => {
           explodedTargetsRef.current = targets;
           stateFactorRef.current = DISSOLVED_ALPHA_FACTOR;
-          lineFadeRef.current = 0;
           modeRef.current = 'dissolved';
         },
       });
@@ -566,8 +534,14 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
         return;
       }
 
-      const delays = nodes.map(() => Math.random() * REFORM_NODE_MAX_DELAY);
-      const starts = nodes.map((node) => new THREE.Vector3(node.x, node.y, node.z));
+      const delays = new Float32Array(data.count);
+      const starts = new Float32Array(data.count * 3);
+      for (let i = 0; i < data.count; i++) {
+        delays[i] = Math.random() * REFORM_NODE_MAX_DELAY;
+        starts[i * 3] = data.x[i];
+        starts[i * 3 + 1] = data.y[i];
+        starts[i * 3 + 2] = data.z[i];
+      }
 
       const driver = { t: 0 };
       gsap.to(driver, {
@@ -576,13 +550,10 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
         ease: 'none',
         onUpdate: () => applyReformFrame(driver.t, delays, starts),
         onComplete: () => {
-          nodes.forEach((node) => {
-            node.x = node.baseX;
-            node.y = node.baseY;
-            node.z = node.baseZ;
-          });
+          data.x.set(data.baseX);
+          data.y.set(data.baseY);
+          data.z.set(data.baseZ);
           stateFactorRef.current = 1;
-          lineFadeRef.current = 1;
           // O modo 'idle' não reescreve posição (os pontos ficam parados de propósito), então a
           // posição-base final precisa ser transcrita aqui — senão os pontos congelariam no
           // último frame do tween, a um fio de distância do lugar certo.
@@ -598,20 +569,10 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
 
   return (
     <group ref={groupRef} position={[0, groupYOffset(headScale), 0]} scale={headScale}>
-      {/* Wireframe por baixo dos pontos: são as arestas que dão a forma da cabeça; os vértices
-          brilhantes por cima é que dão o aspecto de constelação. */}
-      <lineSegments>
-        <bufferGeometry ref={linesGeometryRef}>
-          <bufferAttribute attach="attributes-position" args={[buffers.linePositions, 3]} />
-          <bufferAttribute attach="attributes-color" args={[buffers.lineColors, 4]} />
-        </bufferGeometry>
-        <lineBasicMaterial ref={linesMaterialRef} vertexColors transparent depthWrite={false} />
-      </lineSegments>
-
       <points>
         <bufferGeometry ref={plainGeometryRef}>
-          <bufferAttribute attach="attributes-position" args={[buffers.plainPositions, 3]} />
-          <bufferAttribute attach="attributes-color" args={[buffers.plainColors, 4]} />
+          <bufferAttribute attach="attributes-position" args={[buffers.plain.positions, 3]} />
+          <bufferAttribute attach="attributes-color" args={[buffers.plain.colors, 4]} />
         </bufferGeometry>
         {/* `map` com o sprite radial é o que tira o quadrado duro do ponto. `alphaTest` fica no
             padrão (0) de propósito: qualquer valor acima recortaria o halo suave num disco de
@@ -628,8 +589,8 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
 
       <points>
         <bufferGeometry ref={starGeometryRef}>
-          <bufferAttribute attach="attributes-position" args={[buffers.starPositions, 3]} />
-          <bufferAttribute attach="attributes-color" args={[buffers.starColors, 4]} />
+          <bufferAttribute attach="attributes-position" args={[buffers.star.positions, 3]} />
+          <bufferAttribute attach="attributes-color" args={[buffers.star.colors, 4]} />
         </bufferGeometry>
         <pointsMaterial
           map={getPointSprite()}
@@ -824,10 +785,23 @@ export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) 
 
   const [coarse] = useState(() => isCoarsePointer());
 
-  const dataRef = useRef<FaceData | null>(null);
-  if (dataRef.current === null) {
-    dataRef.current = buildFace();
-  }
+  // A amostragem depende da imagem estar decodificada, então é assíncrona: a cena só monta quando
+  // as partículas existem. Até lá a seção fica só com o título, sem buraco de layout (o canvas é
+  // posicionado de forma absoluta).
+  const [data, setData] = useState<FaceData | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    sampleImage(headImageUrl, coarse ? MOBILE_MAX_PARTICLES : MAX_PARTICLES)
+      .then((particles) => {
+        if (!cancelled) setData(particles);
+      })
+      .catch(() => {
+        // Sem partículas a seção continua funcionando: o texto ainda abre pelo botão.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [coarse]);
 
   const modeRef = useRef<Mode>('idle');
   const controlsRef = useRef<FaceControls>({ explode: () => {}, reform: () => {} });
@@ -892,16 +866,18 @@ export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) 
             gl={{ antialias: true, alpha: true }}
             frameloop={frameloop}
           >
-            <HeadScene
-              data={dataRef.current}
-              modeRef={modeRef}
-              controlsRef={controlsRef}
-              wrapperRef={wrapperRef}
-              reducedMotion={reducedMotion}
-              fine={fine}
-              coarse={coarse}
-              onDissolvedChange={setDissolved}
-            />
+            {data ? (
+              <HeadScene
+                data={data}
+                modeRef={modeRef}
+                controlsRef={controlsRef}
+                wrapperRef={wrapperRef}
+                reducedMotion={reducedMotion}
+                fine={fine}
+                coarse={coarse}
+                onDissolvedChange={setDissolved}
+              />
+            ) : null}
           </Canvas>
         </div>
       </button>

@@ -1,22 +1,19 @@
-# Créditos do modelo 3D
+# Origem da imagem do rosto
 
-`head-mesh.json` é derivado de **"Infinite, 3D Head Scan" por Lee Perry-Smith**, licenciado sob
-[Creative Commons Attribution 3.0 Unported](https://creativecommons.org/licenses/by/3.0/).
-Original em [www.triplegangers.com](https://www.triplegangers.com), distribuído junto ao
-[three.js](https://github.com/mrdoob/three.js/tree/master/examples/models/gltf/LeePerrySmith).
+`cabeça3d.png` foi gerada por IA a pedido do Carlos Rafael — não é material de banco de imagens,
+não há licença de terceiros envolvida.
 
-A licença permite uso comercial e obras derivadas, exigindo apenas a atribuição acima.
+`head-3d.webp` é a mesma imagem reduzida para 900×1350 e recomprimida em WebP (1.511 KB → 181 KB).
+É essa versão que o site carrega; o PNG original fica guardado só como fonte, caso seja preciso
+gerar de novo.
 
-## O que foi feito com o original
+## Como o desenho é montado
 
-O `.glb` original (9.279 vértices, 17.684 triângulos) foi processado offline para virar uma malha
-leve o bastante pra rodar no navegador como wireframe:
+O `FaceGraphic.tsx` não exibe a imagem: ele a **lê**. A imagem é desenhada uma vez num canvas fora
+de tela, os pixels são varridos, e cada pixel aceso vira uma partícula na mesma posição relativa
+que ocupava na imagem. O brilho do pixel define a opacidade da partícula, e os mais brilhantes
+(os nós da malha) viram pontos maiores que cintilam.
 
-1. Soldagem de vértices duplicados nas costuras de UV (`mergeVertices`) — sem isso a decimação não
-   consegue colapsar através das costuras e sobram pontos empilhados no mesmo lugar.
-2. Decimação por colapso de arestas (`SimplifyModifier` do three.js) até ~1.600 vértices.
-3. Extração da lista de arestas únicas a partir dos triângulos.
-4. Normalização: centrado na origem e escalado pra 2 unidades de altura.
-
-O resultado (`nodes` + `edges`) é o que o `FaceGraphic.tsx` consome — nenhuma textura, nenhum
-carregamento de `.glb` em runtime.
+É por isso que o desenho sai idêntico à referência: a forma não é recriada, é amostrada dela.
+E, por serem partículas de verdade, elas explodem para revelar a bio e voltam a se juntar —
+coisa que uma imagem estática não faria.
