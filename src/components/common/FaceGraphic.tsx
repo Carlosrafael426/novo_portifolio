@@ -12,29 +12,31 @@ const ACCENT_COLOR = new THREE.Color(ACCENT_HEX);
 // Amostragem da imagem: cada pixel aceso vira uma partícula. O passo controla a densidade — 2
 // significa "olhe 1 pixel a cada 2, nos dois eixos". Abaixo do limiar o pixel é fundo e é
 // descartado. O teto existe porque cada partícula custa escrita por frame durante a explosão.
-const SAMPLE_STEP = 2;
+const SAMPLE_STEP = 1;
 const SAMPLE_THRESHOLD = 26;
-const MAX_PARTICLES = 48000;
-const MOBILE_MAX_PARTICLES = 22000;
+const MAX_PARTICLES = 35000;
+const MOBILE_MAX_PARTICLES = 15000;
 
 // O brilho do pixel vira opacidade, mas não linearmente: as linhas finas da imagem são bem
 // escuras (anti-aliasing as dilui), e cru elas sumiriam. A raiz levanta os tons baixos sem
 // estourar os altos, e o piso garante que nenhuma partícula amostrada fique invisível.
-const ALPHA_FLOOR = 0.3;
+const ALPHA_FLOOR = 0.52;
 
 // Acima disso o pixel é um "nó" da malha (os pontos brilhantes da imagem), não linha: ganha
 // tamanho maior e entra no sorteio da cintilância.
 const STAR_THRESHOLD = 168;
 
-const POINT_SIZE = 0.017;
+// O tamanho do ponto não é afetado pela escala do grupo (o shader dimensiona pela distância da
+// câmera, não pela escala do objeto). Então ao ampliar a cabeça as partículas se afastam mas
+// continuam do mesmo tamanho na tela, e o desenho abre buracos — o tamanho precisa crescer junto.
+const POINT_SIZE = 0.03;
 const POINT_SPRITE_SIZE = 64;
 
-// Enquadramento: a cabeça (y de 0 a 1 na malha) ocupa o miolo da tela e os ombros ficam cortados
-// pela borda de baixo — mesmo enquadramento da referência. No mobile a escala cai bastante: a
-// câmera mantém o FOV vertical, então numa tela em pé a largura visível encolhe muito e os ombros
-// (bem mais largos que a cabeça) vazariam pelas laterais.
-const HEAD_SCALE = 1.7;
-const MOBILE_HEAD_SCALE = 1.15;
+// Enquadramento: a cabeça ocupa o miolo da tela. No mobile a escala cai: a câmera mantém o FOV
+// vertical, então numa tela em pé a largura visível encolhe muito e os ombros (bem mais largos que
+// a cabeça) vazariam pelas laterais.
+const HEAD_SCALE = 1.9;
+const MOBILE_HEAD_SCALE = 1.23;
 
 /** Mantém o centro da cabeça (y≈0.5 na malha) sempre no mesmo ponto da tela, qualquer que seja a
  *  escala. */
@@ -73,22 +75,36 @@ const DRIFT_FREQ_X = 0.09;
 const DRIFT_FREQ_Y = 0.07;
 const DRIFT_FREQ_Z = 0.06;
 
-// Rotação acompanhando o mouse (só desktop com ponteiro fino). Curta de propósito: o desenho é
-// plano, então giro grande denunciaria o cartão. O que se quer aqui é só o parallax entre as
-// camadas de Z.
-const MAX_ROTATE_Y = 7;
-const MAX_ROTATE_X = 3.5;
-const ROTATE_RANGE_PX = 420;
-const ROTATE_DAMPING = 0.06;
+// Balanço próprio, sem seguir o mouse: a cabeça oscila devagar sozinha. Como cada partícula tem
+// seu Z, o giro produz parallax entre as camadas — é o que dá a sensação de volume num desenho
+// que é plano. Amplitudes curtas e períodos longos, pra ler como respiração e não como giro.
+const SWAY_ROTATE_Y = 9;
+const SWAY_ROTATE_X = 3.5;
+const SWAY_SPEED_Y = 0.17;
+const SWAY_SPEED_X = 0.11;
+const SWAY_FLOAT_Y = 0.035;
+const SWAY_FLOAT_SPEED = 0.23;
 
-const EXPLODE_NODE_DURATION = 0.7;
-const EXPLODE_NODE_MAX_DELAY = 0.25;
+// Explosão bem mais longa e mais forte que a de antes: o clique precisa *aparecer*. Boa parte do
+// efeito vem de as partículas continuarem acesas durante o voo — só escurecem no fim, quando o
+// texto já está entrando.
+const EXPLODE_NODE_DURATION = 1.15;
+const EXPLODE_NODE_MAX_DELAY = 0.45;
 const EXPLODE_TOTAL = EXPLODE_NODE_DURATION + EXPLODE_NODE_MAX_DELAY;
-const EXPLODE_PUSH_MIN = 1.6;
-const EXPLODE_PUSH_MAX = 4.5;
+// O empurrão é em espaço local, depois multiplicado pela escala do grupo — e a área visível tem
+// cerca de ±2.5 unidades de altura. Valores altos demais jogam tudo pra fora do enquadramento no
+// primeiro instante, e a explosão parece que simplesmente apagou o desenho. Estes mantêm os
+// estilhaços dentro (ou na borda) da tela durante todo o voo.
+const EXPLODE_PUSH_MIN = 0.25;
+const EXPLODE_PUSH_MAX = 1.1;
+// Fração do tween em que as partículas ainda estão com o brilho cheio. Antes elas apagavam desde
+// o primeiro frame, e a explosão praticamente não era vista.
+const EXPLODE_BRIGHT_HOLD = 0.45;
+// Pico de brilho no instante do estouro — o clarão que anuncia que algo aconteceu.
+const EXPLODE_FLASH = 1.5;
 
-const REFORM_NODE_DURATION = 0.8;
-const REFORM_NODE_MAX_DELAY = 0.2;
+const REFORM_NODE_DURATION = 0.9;
+const REFORM_NODE_MAX_DELAY = 0.25;
 const REFORM_TOTAL = REFORM_NODE_DURATION + REFORM_NODE_MAX_DELAY;
 
 const easeExplode = gsap.parseEase('power2.out');
@@ -122,9 +138,6 @@ interface Particles {
   centroid: THREE.Vector3;
 }
 
-function isFinePointer(): boolean {
-  return window.matchMedia('(hover: hover) and (pointer: fine)').matches;
-}
 function isCoarsePointer(): boolean {
   return window.matchMedia('(pointer: coarse)').matches;
 }
@@ -280,14 +293,12 @@ interface HeadSceneProps {
   data: FaceData;
   modeRef: React.RefObject<Mode>;
   controlsRef: React.RefObject<FaceControls>;
-  wrapperRef: React.RefObject<HTMLDivElement | null>;
   reducedMotion: boolean;
-  fine: boolean;
   coarse: boolean;
   onDissolvedChange: (dissolved: boolean) => void;
 }
 
-function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine, coarse, onDissolvedChange }: HeadSceneProps) {
+function HeadScene({ data, modeRef, controlsRef, reducedMotion, coarse, onDissolvedChange }: HeadSceneProps) {
   const { starIndices, plainIndices, centroid } = data;
   const invalidate = useThree((state) => state.invalidate);
   const pointSize = coarse ? POINT_SIZE * MOBILE_POINT_SIZE_FACTOR : POINT_SIZE;
@@ -330,21 +341,8 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
     }
   }, []);
 
-  const rotation = useRef({ x: 0, y: 0 });
-  const pointer = useRef({ x: 0, y: 0, active: false });
   /** Destinos da explosão em array plano (x,y,z por partícula), pelo mesmo motivo dos demais. */
   const explodedTargetsRef = useRef<Float32Array | null>(null);
-
-  useEffect(() => {
-    if (!fine || reducedMotion) return;
-    function handlePointerMove(event: PointerEvent) {
-      pointer.current.x = event.clientX;
-      pointer.current.y = event.clientY;
-      pointer.current.active = true;
-    }
-    window.addEventListener('pointermove', handlePointerMove);
-    return () => window.removeEventListener('pointermove', handlePointerMove);
-  }, [fine, reducedMotion]);
 
   /**
    * Único escritor dos BufferAttribute. O alpha final de cada ponto é composto de três fontes
@@ -402,27 +400,17 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
     const mode = modeRef.current;
 
     if (mode === 'idle') {
-      // Posições ficam paradas em repouso: o que dá vida agora é o brilho (cintilância), não o
-      // deslocamento — num retrato, oscilar posição lê como tremor.
-      if (!reducedMotion) writeAttributes(elapsed, false);
+      // Posições das partículas ficam paradas em repouso: o que dá vida é o brilho (cintilância)
+      // mais o balanço do grupo inteiro, não o deslocamento individual — num retrato, cada ponto
+      // oscilando lê como tremor.
+      if (!reducedMotion) {
+        writeAttributes(elapsed, false);
 
-      if (fine && !reducedMotion) {
-        let targetY = 0;
-        let targetX = 0;
-        const wrapper = wrapperRef.current;
-        if (pointer.current.active && wrapper) {
-          const rect = wrapper.getBoundingClientRect();
-          const centerX = rect.left + rect.width / 2;
-          const centerY = rect.top + rect.height / 2;
-          const dx = pointer.current.x - centerX;
-          const dy = pointer.current.y - centerY;
-          targetY = Math.max(-1, Math.min(1, dx / ROTATE_RANGE_PX)) * MAX_ROTATE_Y;
-          targetX = Math.max(-1, Math.min(1, dy / ROTATE_RANGE_PX)) * MAX_ROTATE_X;
-        }
-        rotation.current.y += (targetY - rotation.current.y) * ROTATE_DAMPING;
-        rotation.current.x += (targetX - rotation.current.x) * ROTATE_DAMPING;
-        group.rotation.y = THREE.MathUtils.degToRad(rotation.current.y);
-        group.rotation.x = THREE.MathUtils.degToRad(rotation.current.x);
+        // Balanço próprio, sem mouse. Os dois eixos têm períodos diferentes de propósito: com
+        // períodos iguais o movimento fecharia sempre no mesmo ciclo e denunciaria a repetição.
+        group.rotation.y = THREE.MathUtils.degToRad(Math.sin(elapsed * SWAY_SPEED_Y) * SWAY_ROTATE_Y);
+        group.rotation.x = THREE.MathUtils.degToRad(Math.sin(elapsed * SWAY_SPEED_X) * SWAY_ROTATE_X);
+        group.position.y = groupYOffset(headScale) + Math.sin(elapsed * SWAY_FLOAT_SPEED) * SWAY_FLOAT_Y;
       }
     } else if (mode === 'dissolved' && !reducedMotion) {
       // Estilhaços continuam à deriva bem devagar no fundo, atrás do texto, em vez de
@@ -455,8 +443,16 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
         data.z[i] = lerp(data.baseZ[i], targets[i * 3 + 2], eased);
       }
 
-      // Só o fator de estado: a escrita no atributo é do writeAttributes, via useFrame.
-      stateFactorRef.current = lerp(1, DISSOLVED_ALPHA_FACTOR, easeExplode(t));
+      // Brilho em duas fases: um clarão no estouro e brilho cheio enquanto as partículas voam,
+      // e só depois o recuo pro nível de fundo. Antes isso era um único lerp começando no frame
+      // zero — as partículas apagavam enquanto ainda saíam, e o clique parecia não fazer nada.
+      if (t < EXPLODE_BRIGHT_HOLD) {
+        const flashT = t / EXPLODE_BRIGHT_HOLD;
+        stateFactorRef.current = lerp(EXPLODE_FLASH, 1, easeExplode(flashT));
+      } else {
+        const fadeT = (t - EXPLODE_BRIGHT_HOLD) / (1 - EXPLODE_BRIGHT_HOLD);
+        stateFactorRef.current = lerp(1, DISSOLVED_ALPHA_FACTOR, easeExplode(fadeT));
+      }
     }
 
     function applyReformFrame(t: number, delays: Float32Array, starts: Float32Array) {
@@ -807,7 +803,6 @@ export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) 
   const controlsRef = useRef<FaceControls>({ explode: () => {}, reform: () => {} });
 
   const [reducedMotion] = useState(() => prefersReducedMotion());
-  const [fine] = useState(() => isFinePointer());
   const isVisible = useIsVisible(wrapperRef);
   const frameloop = !isVisible ? 'never' : reducedMotion ? 'demand' : 'always';
 
@@ -871,9 +866,7 @@ export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) 
                 data={data}
                 modeRef={modeRef}
                 controlsRef={controlsRef}
-                wrapperRef={wrapperRef}
                 reducedMotion={reducedMotion}
-                fine={fine}
                 coarse={coarse}
                 onDissolvedChange={setDissolved}
               />
@@ -890,6 +883,10 @@ export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) 
       <div
         onClick={() => controlsRef.current.reform()}
         className={`fixed inset-0 z-10 flex items-center justify-center p-1 transition-opacity duration-500 sm:p-8 ${dissolved ? 'pointer-events-auto cursor-pointer opacity-100' : 'pointer-events-none opacity-0'}`}
+        // Mesmo atraso do painel: sem isso esta camada começaria a clarear já no frame do clique e
+        // o texto apareceria (ainda minúsculo) antes da explosão acontecer, quebrando a ligação
+        // entre uma coisa e outra.
+        style={{ transitionDelay: dissolved ? '340ms' : '0ms' }}
       >
         {/* O texto é bem mais longo agora (bio completa) — cabe sem rolar a página inteira em duas
             colunas, inclusive no mobile (só a partir de sm que o texto cresce e o espaçamento
@@ -898,11 +895,17 @@ export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) 
             esse conteúdo — em vez disso, os blocos já vêm divididos em duas listas balanceadas por
             tamanho (splitIntoColumns) e cada uma vira uma coluna comum de verdade (`grid-cols-2`).
             O max-h + overflow-y-auto aqui dentro é só uma rede de segurança pra telas realmente
-            fora do comum; o card inteiro "emerge" de leve escala/profundidade em vez de só
-            aparecer, pra reforçar a sensação de vir de trás da explosão. */}
+            fora do comum.
+
+            O texto vem *de dentro* da explosão: nasce pequeno e no centro (escala 0.55), como se
+            estivesse lá no fundo, e avança até o tamanho real. O atraso na entrada é o que amarra
+            as duas coisas — ele só começa a crescer quando as partículas já estão voando, então
+            lê como se tivesse sido cuspido pelo estouro, não como um painel que apareceu por cima.
+            Na volta não há atraso: o texto precisa sair da frente antes de o rosto se remontar. */}
         <div
           ref={panelRef}
-          className={`relative max-h-[calc(100vh-0.5rem)] w-full max-w-5xl overflow-x-hidden overflow-y-auto transition-all duration-500 ease-out-expo sm:max-h-[calc(100vh-4rem)] ${dissolved ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-6 scale-95 opacity-0'}`}
+          className={`relative max-h-[calc(100vh-0.5rem)] w-full max-w-5xl overflow-x-hidden overflow-y-auto transition-all duration-[900ms] ease-out-expo sm:max-h-[calc(100vh-4rem)] ${dissolved ? 'scale-100 opacity-100' : 'scale-[0.55] opacity-0'}`}
+          style={{ transitionDelay: dissolved ? '340ms' : '0ms' }}
         >
           {dissolved && (
             <button
@@ -932,7 +935,10 @@ export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) 
                   <div
                     key={index}
                     className={`transition-opacity duration-500 ease-out-expo ${dissolved ? 'opacity-100' : 'opacity-0'}`}
-                    style={{ transitionDelay: dissolved ? `${220 + index * 35}ms` : '0ms' }}
+                    // Começa depois do painel já ter emergido (340ms de atraso + o grosso dos
+                    // 900ms de escala), pra cascata de linhas ler como o texto se formando já
+                    // no lugar, não durante o voo.
+                    style={{ transitionDelay: dissolved ? `${760 + index * 35}ms` : '0ms' }}
                   >
                     <AboutBlockLine block={block} />
                   </div>
