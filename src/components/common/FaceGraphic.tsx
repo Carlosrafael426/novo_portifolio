@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { gsap } from 'gsap';
 import { aboutContent } from '@/data/about';
@@ -14,18 +14,22 @@ const WHITE_COLOR = new THREE.Color(WHITE_HEX);
 interface FaceMeshData {
   /** 938 × 3 floats: x, y, z de cada nó, já normalizados. */
   nodes: number[];
-  /** 3.259 × 2 ints: pares de índice formando cada aresta. */
-  edges: number[];
-  /** Índices dos nós anatômicos (silhueta, sobrancelhas, olhos, nariz, lábios, mandíbula,
-   *  orelhas, linha central) — sempre contíguos, 0 a 490. O resto é preenchimento de malha. */
+  /** Índices dos nós anatômicos — sempre contíguos, 0 a 490; o resto é preenchimento de malha.
+   *  O campo `edges` do arquivo (3.259 pares) existe mas não é mais lido: o rosto virou nuvem de
+   *  pontos pura. A malha não traz contornos endereçáveis (nenhuma polilinha de olho/boca/
+   *  silhueta), então desenhar as arestas só produzia uma teia triangulada que encobria o rosto
+   *  em vez de descrevê-lo. */
   bright: number[];
 }
 const faceMesh = faceMeshJson as FaceMeshData;
 const ANATOMICAL_COUNT = faceMesh.bright.length;
 
-const FILL_NODE_SIZE = 0.017;
-const ANATOMICAL_NODE_SIZE = 0.03;
-const PARTICLE_SIZE = 0.032;
+// Sem arestas, tamanho e brilho passam a ser as *únicas* ferramentas estruturais — daí a distância
+// grande entre os dois grupos. Os valores parecem altos porque o sprite tem halo: o núcleo opaco
+// ocupa só o miolo do quad, o resto é queda suave até transparente.
+const FILL_NODE_SIZE = 0.022;
+const ANATOMICAL_NODE_SIZE = 0.055;
+const POINT_SPRITE_SIZE = 64;
 
 // Exagera o relevo da malha (que por natureza é raso, 0..0.62) — sem isso, o rosto lê como uma
 // imagem achatada com relevo sutil em vez de algo genuinamente tridimensional.
@@ -33,67 +37,66 @@ const Z_DEPTH_SCALE = 1.9;
 
 // O canvas agora cobre a seção inteira (não só uma caixinha), então o grupo precisa descer no
 // espaço local pra não brigar com o título no topo da seção.
-const GROUP_Y_OFFSET = -0.55;
+const GROUP_Y_OFFSET = -0.6;
 
 // Escala geral do rosto — cresce em volta do próprio centro (a posição do grupo, acima, não é
 // afetada pela escala), então isso não briga com o enquadramento já calibrado.
-const FACE_SCALE = 1.3;
+const FACE_SCALE = 1.45;
 
-// Reduz a quantidade total de pontos (só no preenchimento — os 491 anatômicos continuam sempre
-// intactos, senão o rosto perde legibilidade). No mobile corta ainda mais, por performance.
-const POINT_COUNT_REDUCTION = 0.2;
-const MOBILE_EXTRA_FILL_REDUCTION = 0.5;
+// Só o mobile reduz o preenchimento agora: no desktop a contagem cheia é mantida de propósito —
+// poeira densa porém escura dá volume ao rosto. O que poluía era o brilho e as arestas, não a
+// quantidade de pontos. No mobile ainda vale cortar: sprite com halo é fill-rate bound.
+const MOBILE_EXTRA_FILL_REDUCTION = 0.35;
 
-// Opacidade em função de Z (saliência), não mais de "frontness" — a malha é uma calota frontal
-// com relevo, não uma cabeça fechada, então não existe mais um lado "de trás" pra apagar. Nariz,
-// testa e maçãs (mais salientes) acendem um pouco mais que o resto do mesmo grupo.
-const ANATOMICAL_ALPHA_BASE = 0.52;
-const ANATOMICAL_ALPHA_Z_BOOST = 0.32;
-const FILL_ALPHA_BASE = 0.09;
-const FILL_ALPHA_Z_BOOST = 0.12;
+// Opacidade em função de Z (saliência), não de "frontness" — a malha é uma calota frontal com
+// relevo, não uma cabeça fechada, então não existe um lado "de trás" pra apagar. Nariz, testa e
+// maçãs (mais salientes) acendem um pouco mais que o resto do mesmo grupo.
+const ANATOMICAL_ALPHA_BASE = 0.85;
+const ANATOMICAL_ALPHA_Z_BOOST = 0.15;
+const FILL_ALPHA_BASE = 0.08;
+const FILL_ALPHA_Z_BOOST = 0.14;
 
 // Enquanto o texto está visível, os estilhaços não somem — recuam pra essa fração da opacidade
 // de repouso e continuam à deriva atrás do texto, como plano de fundo vivo.
-const DISSOLVED_ALPHA_FACTOR = 0.45;
+const DISSOLVED_ALPHA_FACTOR = 0.28;
 
-const IDLE_JITTER = 0.01;
-// Amplitude e velocidade do movimento lento dos estilhaços enquanto o texto está visível — bem
-// maior e mais lento que o jitter ambiente do rosto montado, pra ler como uma constelação de
-// estrelas flutuando devagar pela seção inteira, não como ruído.
+// Cintilância: um punhado de pontos pulsa de brilho no lugar de todo mundo oscilar de posição.
+// Oscilar posição num retrato lê como tremor; cintilar lê como constelação viva. São os mesmos
+// pontos que recebem lime — amostrados entre os anatômicos, que são os brilhantes (uma faísca no
+// preenchimento, com alfa ~0.05, seria invisível).
+const TWINKLE_FRACTION = 0.07;
+const TWINKLE_AMPLITUDE = 0.55;
+const TWINKLE_SPEED_MIN = 0.6;
+const TWINKLE_SPEED_MAX = 1.8;
+
+// Amplitude e velocidade do movimento lento dos estilhaços enquanto o texto está visível — pra
+// ler como uma constelação de estrelas flutuando devagar pela seção inteira, não como ruído.
 const DRIFT_AMPLITUDE = 0.18;
 const DRIFT_FREQ_X = 0.09;
 const DRIFT_FREQ_Y = 0.07;
 const DRIFT_FREQ_Z = 0.06;
 
-// Rotação do rosto acompanhando o mouse (só desktop com ponteiro fino).
-const MAX_ROTATE_Y = 26;
-const MAX_ROTATE_X = 12;
+// Rotação do rosto acompanhando o mouse (só desktop com ponteiro fino). Amplitude curta de
+// propósito: a malha é uma casca frontal, e girar muito denuncia que é uma máscara plana.
+const MAX_ROTATE_Y = 11;
+const MAX_ROTATE_X = 5;
 const ROTATE_RANGE_PX = 420;
 const ROTATE_DAMPING = 0.06;
 
 const EXPLODE_NODE_DURATION = 0.7;
 const EXPLODE_NODE_MAX_DELAY = 0.25;
 const EXPLODE_TOTAL = EXPLODE_NODE_DURATION + EXPLODE_NODE_MAX_DELAY;
-const EXPLODE_LINES_DURATION = 0.35;
-// Bem maior que o rosto em si — os fragmentos precisam se espalhar pela seção inteira, não só
-// pela caixinha onde o rosto vivia.
-const EXPLODE_PUSH_MIN = 0.7;
-const EXPLODE_PUSH_MAX = 1.9;
+// Dispersão bem ampla: sem arestas esticando junto (que viravam espaguete se fosse longe demais),
+// os fragmentos podem se espalhar pela seção inteira como um campo de estrelas.
+const EXPLODE_PUSH_MIN = 1.6;
+const EXPLODE_PUSH_MAX = 4.5;
 
 const REFORM_NODE_DURATION = 0.8;
 const REFORM_NODE_MAX_DELAY = 0.2;
 const REFORM_TOTAL = REFORM_NODE_DURATION + REFORM_NODE_MAX_DELAY;
-const REFORM_LINES_DELAY = 0.3;
-const REFORM_LINES_DURATION = 0.6;
-
-// Opacidade "de repouso" das linhas/partículas — o fade de explosão/reconstrução anima um fator
-// que multiplica por cima desse valor, nunca substitui (senão elas ficam presas depois de animar).
-const LINES_BASE_OPACITY = 0.16;
-const PARTICLES_BASE_OPACITY = 0.9;
 
 const easeExplode = gsap.parseEase('power2.out');
 const easeReform = gsap.parseEase('power3.out');
-const easeLines = gsap.parseEase('power1.out');
 
 function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
@@ -122,23 +125,48 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
-function mixToWhite(amount: number): THREE.Color {
-  return ACCENT_COLOR.clone().lerp(WHITE_COLOR, amount);
+let pointSprite: THREE.CanvasTexture | null = null;
+
+/**
+ * Sprite radial (branco opaco no centro → transparente na borda) usado como `map` dos pontos. Sem
+ * ele o `PointsMaterial` desenha quadrados duros, que leem como malha de colisão em vez de
+ * constelação. A textura é branca de propósito: quem tinge é a cor por vértice.
+ *
+ * Singleton de módulo — os dois materiais compartilham a mesma textura, e ela vive enquanto a aba
+ * viver (não é descartada no unmount justamente pra não refazer o canvas a cada remontagem).
+ */
+function getPointSprite(): THREE.CanvasTexture {
+  if (pointSprite) return pointSprite;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = POINT_SPRITE_SIZE;
+  canvas.height = POINT_SPRITE_SIZE;
+
+  const context = canvas.getContext('2d');
+  if (context) {
+    const center = POINT_SPRITE_SIZE / 2;
+    const gradient = context.createRadialGradient(center, center, 0, center, center, center);
+    gradient.addColorStop(0, 'rgba(255,255,255,1)');
+    gradient.addColorStop(0.35, 'rgba(255,255,255,0.55)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, POINT_SPRITE_SIZE, POINT_SPRITE_SIZE);
+  }
+
+  pointSprite = new THREE.CanvasTexture(canvas);
+  return pointSprite;
 }
 
 /**
- * Monta os nós/arestas a partir da malha fixa. Os 491 nós anatômicos continuam sempre presentes
- * (índices não mudam de posição no remapeamento, porque são sempre os primeiros a entrar) — só o
- * preenchimento é reduzido: um pouco pra todo mundo (POINT_COUNT_REDUCTION) e mais ainda no
- * mobile, por performance. Distribuição uniforme (tipo Bresenham) em vez de um stride fixo, pra
- * não ralar mais uma região específica do que outra dependendo da ordem dos vértices na malha.
+ * Monta os nós a partir da malha fixa. Os 491 nós anatômicos continuam sempre presentes (índices
+ * não mudam de posição no remapeamento, porque são sempre os primeiros a entrar) — só o
+ * preenchimento é reduzido, e só no mobile. Distribuição uniforme (tipo Bresenham) em vez de um
+ * stride fixo, pra não ralar mais uma região específica do que outra dependendo da ordem dos
+ * vértices na malha.
  */
 function buildMeshNodeSet(coarse: boolean) {
   const totalNodes = faceMesh.nodes.length / 3;
-  const fillCount = totalNodes - ANATOMICAL_COUNT;
-  const targetFillCount = Math.round(totalNodes * (1 - POINT_COUNT_REDUCTION)) - ANATOMICAL_COUNT;
-  const fillKeepFraction =
-    Math.max(0, Math.min(1, targetFillCount / fillCount)) * (coarse ? MOBILE_EXTRA_FILL_REDUCTION : 1);
+  const fillKeepFraction = coarse ? MOBILE_EXTRA_FILL_REDUCTION : 1;
 
   const keep = new Uint8Array(totalNodes);
   let fillLocalIndex = 0;
@@ -152,35 +180,22 @@ function buildMeshNodeSet(coarse: boolean) {
     keep[i] = keepThis ? 1 : 0;
   }
 
-  const remap = new Int32Array(totalNodes).fill(-1);
   const nodes: HeadNode[] = [];
+  const anatomicalIndices: number[] = [];
+  const fillIndices: number[] = [];
   let zMax = 0.0001;
   for (let i = 0; i < totalNodes; i++) {
     if (!keep[i]) continue;
-    remap[i] = nodes.length;
     const x = faceMesh.nodes[i * 3];
     const y = faceMesh.nodes[i * 3 + 1];
     const z = faceMesh.nodes[i * 3 + 2] * Z_DEPTH_SCALE;
     if (z > zMax) zMax = z;
+    if (i < ANATOMICAL_COUNT) anatomicalIndices.push(nodes.length);
+    else fillIndices.push(nodes.length);
     nodes.push(makeNode(x, y, z));
   }
 
-  const connections: Array<[number, number]> = [];
-  for (let i = 0; i < faceMesh.edges.length; i += 2) {
-    const a = faceMesh.edges[i];
-    const b = faceMesh.edges[i + 1];
-    if (keep[a] && keep[b]) connections.push([remap[a], remap[b]]);
-  }
-
-  const anatomicalIndices: number[] = [];
-  const fillIndices: number[] = [];
-  for (let i = 0; i < totalNodes; i++) {
-    if (!keep[i]) continue;
-    if (i < ANATOMICAL_COUNT) anatomicalIndices.push(remap[i]);
-    else fillIndices.push(remap[i]);
-  }
-
-  return { nodes, connections, anatomicalIndices, fillIndices, zMax };
+  return { nodes, anatomicalIndices, fillIndices, zMax };
 }
 
 function buildNodeAlpha(nodeCount: number, anatomicalIndices: number[], nodes: HeadNode[], zMax: number): number[] {
@@ -195,22 +210,35 @@ function buildNodeAlpha(nodeCount: number, anatomicalIndices: number[], nodes: H
   });
 }
 
-interface Particle {
-  connectionIndex: number;
-  progress: number;
-  speed: number;
+interface TwinkleData {
+  /** 1 nos nós que cintilam (e que também recebem lime), 0 no resto. Indexado por nó. */
+  isTwinkle: Uint8Array;
+  phase: Float32Array;
+  speed: Float32Array;
 }
 
-const PARTICLE_COUNT = 22;
-const PARTICLE_SPEED_MIN = 0.09;
-const PARTICLE_SPEED_MAX = 0.22;
+/** Sorteia quais nós cintilam, com fase e velocidade próprias pra não pulsarem em bloco. Amostra
+ *  só entre os anatômicos: o preenchimento fica com alfa ~0.05, onde uma faísca seria invisível. */
+function buildTwinkle(anatomicalIndices: number[], nodeCount: number): TwinkleData {
+  const isTwinkle = new Uint8Array(nodeCount);
+  const phase = new Float32Array(nodeCount);
+  const speed = new Float32Array(nodeCount);
 
-function buildParticles(connectionCount: number): Particle[] {
-  return Array.from({ length: Math.min(PARTICLE_COUNT, connectionCount) }, () => ({
-    connectionIndex: Math.floor(Math.random() * connectionCount),
-    progress: Math.random(),
-    speed: PARTICLE_SPEED_MIN + Math.random() * (PARTICLE_SPEED_MAX - PARTICLE_SPEED_MIN),
-  }));
+  // Fisher-Yates parcial: sorteia sem repetir, sem embaralhar a lista inteira.
+  const pool = [...anatomicalIndices];
+  const count = Math.round(pool.length * TWINKLE_FRACTION);
+  for (let i = 0; i < count; i++) {
+    const pick = i + Math.floor(Math.random() * (pool.length - i));
+    const nodeIndex = pool[pick];
+    pool[pick] = pool[i];
+    pool[i] = nodeIndex;
+
+    isTwinkle[nodeIndex] = 1;
+    phase[nodeIndex] = Math.random() * Math.PI * 2;
+    speed[nodeIndex] = TWINKLE_SPEED_MIN + Math.random() * (TWINKLE_SPEED_MAX - TWINKLE_SPEED_MIN);
+  }
+
+  return { isTwinkle, phase, speed };
 }
 
 /**
@@ -227,12 +255,12 @@ function computeCentroid(nodes: HeadNode[]): THREE.Vector3 {
 }
 
 function buildFace(coarse: boolean) {
-  const { nodes, connections, anatomicalIndices, fillIndices, zMax } = buildMeshNodeSet(coarse);
+  const { nodes, anatomicalIndices, fillIndices, zMax } = buildMeshNodeSet(coarse);
   const nodeAlpha = buildNodeAlpha(nodes.length, anatomicalIndices, nodes, zMax);
-  const particles = buildParticles(connections.length);
+  const twinkle = buildTwinkle(anatomicalIndices, nodes.length);
   const centroid = computeCentroid(nodes);
 
-  return { nodes, connections, anatomicalIndices, fillIndices, nodeAlpha, particles, centroid };
+  return { nodes, anatomicalIndices, fillIndices, nodeAlpha, twinkle, centroid };
 }
 
 type FaceData = ReturnType<typeof buildFace>;
@@ -254,52 +282,53 @@ interface HeadSceneProps {
 }
 
 function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine, onDissolvedChange }: HeadSceneProps) {
-  const { nodes, connections, anatomicalIndices, fillIndices, nodeAlpha, particles, centroid } = data;
+  const { nodes, anatomicalIndices, fillIndices, nodeAlpha, twinkle, centroid } = data;
+  const invalidate = useThree((state) => state.invalidate);
 
   const groupRef = useRef<THREE.Group>(null);
   const fillGeometryRef = useRef<THREE.BufferGeometry>(null);
   const anatomicalGeometryRef = useRef<THREE.BufferGeometry>(null);
-  const linesGeometryRef = useRef<THREE.BufferGeometry>(null);
-  const linesMaterialRef = useRef<THREE.LineBasicMaterial>(null);
-  const particlesGeometryRef = useRef<THREE.BufferGeometry>(null);
-  const particlesMaterialRef = useRef<THREE.PointsMaterial>(null);
+
+  // Fator de estado único: 1 em repouso, DISSOLVED_ALPHA_FACTOR com a bio aberta. O GSAP tweena
+  // *este número*, nunca o atributo de cor — ver writeAttributes, que é o único escritor de alpha.
+  const stateFactorRef = useRef(1);
 
   const buffers = useMemo(() => {
     const fillPositions = new Float32Array(fillIndices.length * 3);
     const fillColors = new Float32Array(fillIndices.length * 4);
     const anatomicalPositions = new Float32Array(anatomicalIndices.length * 3);
     const anatomicalColors = new Float32Array(anatomicalIndices.length * 4);
-    const linePositions = new Float32Array(connections.length * 2 * 3);
-    const particlePositions = new Float32Array(particles.length * 3);
 
+    // Preenchimento é sempre branco: o lime mora só nos pontos que cintilam, e esses são sorteados
+    // entre os anatômicos.
     fillIndices.forEach((nodeIndex, i) => {
       const node = nodes[nodeIndex];
       fillPositions[i * 3] = node.x;
       fillPositions[i * 3 + 1] = node.y;
       fillPositions[i * 3 + 2] = node.z;
-      fillColors[i * 4] = ACCENT_COLOR.r;
-      fillColors[i * 4 + 1] = ACCENT_COLOR.g;
-      fillColors[i * 4 + 2] = ACCENT_COLOR.b;
+      fillColors[i * 4] = WHITE_COLOR.r;
+      fillColors[i * 4 + 1] = WHITE_COLOR.g;
+      fillColors[i * 4 + 2] = WHITE_COLOR.b;
       fillColors[i * 4 + 3] = nodeAlpha[nodeIndex];
     });
 
-    const anatomicalTint = mixToWhite(0.4);
     anatomicalIndices.forEach((nodeIndex, i) => {
       const node = nodes[nodeIndex];
+      const color = twinkle.isTwinkle[nodeIndex] ? ACCENT_COLOR : WHITE_COLOR;
       anatomicalPositions[i * 3] = node.x;
       anatomicalPositions[i * 3 + 1] = node.y;
       anatomicalPositions[i * 3 + 2] = node.z;
-      anatomicalColors[i * 4] = anatomicalTint.r;
-      anatomicalColors[i * 4 + 1] = anatomicalTint.g;
-      anatomicalColors[i * 4 + 2] = anatomicalTint.b;
+      anatomicalColors[i * 4] = color.r;
+      anatomicalColors[i * 4 + 1] = color.g;
+      anatomicalColors[i * 4 + 2] = color.b;
       anatomicalColors[i * 4 + 3] = nodeAlpha[nodeIndex];
     });
 
-    return { fillPositions, fillColors, anatomicalPositions, anatomicalColors, linePositions, particlePositions };
-  }, [nodes, connections, anatomicalIndices, fillIndices, nodeAlpha, particles]);
+    return { fillPositions, fillColors, anatomicalPositions, anatomicalColors };
+  }, [nodes, anatomicalIndices, fillIndices, nodeAlpha, twinkle]);
 
   useEffect(() => {
-    for (const geometry of [fillGeometryRef.current, anatomicalGeometryRef.current, linesGeometryRef.current, particlesGeometryRef.current]) {
+    for (const geometry of [fillGeometryRef.current, anatomicalGeometryRef.current]) {
       const position = geometry?.attributes.position;
       if (position instanceof THREE.BufferAttribute) position.setUsage(THREE.DynamicDrawUsage);
       const color = geometry?.attributes.color;
@@ -322,68 +351,59 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
     return () => window.removeEventListener('pointermove', handlePointerMove);
   }, [fine, reducedMotion]);
 
-  function writeConnectionsAndParticles() {
-    const linePos = linesGeometryRef.current?.attributes.position as THREE.BufferAttribute | undefined;
-    if (linePos) {
-      connections.forEach(([a, b], i) => {
-        const na = nodes[a];
-        const nb = nodes[b];
-        linePos.setXYZ(i * 2, na.x, na.y, na.z);
-        linePos.setXYZ(i * 2 + 1, nb.x, nb.y, nb.z);
+  /**
+   * Único escritor dos BufferAttribute. O alpha final de cada ponto é composto de três fontes
+   * independentes em vez de cada sistema escrever por cima do outro:
+   *
+   *     alphaFinal = alphaDeRepouso × stateFactor × cintilância
+   *
+   * Sem isso, a cintilância (que roda todo frame) brigaria com os tweens de explosão/reconstrução
+   * e com o estado escurecido — todos disputando o mesmo canal.
+   *
+   * `writePositions` fica falso em repouso, onde os pontos não se movem (a oscilação de posição
+   * saiu de cena em favor da cintilância): aí só a cor precisa subir pra GPU.
+   */
+  function writeAttributes(elapsed: number, writePositions: boolean) {
+    const stateFactor = stateFactorRef.current;
+
+    function writeGroup(indices: number[], geometry: THREE.BufferGeometry | null) {
+      if (!geometry) return;
+      const position = geometry.attributes.position as THREE.BufferAttribute;
+      const color = geometry.attributes.color as THREE.BufferAttribute;
+
+      indices.forEach((nodeIndex, i) => {
+        if (writePositions) {
+          const node = nodes[nodeIndex];
+          position.setXYZ(i, node.x, node.y, node.z);
+        }
+
+        let alpha = nodeAlpha[nodeIndex] * stateFactor;
+        if (!reducedMotion && twinkle.isTwinkle[nodeIndex]) {
+          const pulse = Math.sin(elapsed * twinkle.speed[nodeIndex] + twinkle.phase[nodeIndex]);
+          alpha *= 1 + TWINKLE_AMPLITUDE * pulse;
+        }
+        color.setW(i, Math.max(0, Math.min(1, alpha)));
       });
-      linePos.needsUpdate = true;
+
+      if (writePositions) position.needsUpdate = true;
+      color.needsUpdate = true;
     }
 
-    const particlePos = particlesGeometryRef.current?.attributes.position as THREE.BufferAttribute | undefined;
-    if (particlePos) {
-      particles.forEach((particle, i) => {
-        const [a, b] = connections[particle.connectionIndex];
-        const na = nodes[a];
-        const nb = nodes[b];
-        particlePos.setXYZ(
-          i,
-          na.x + (nb.x - na.x) * particle.progress,
-          na.y + (nb.y - na.y) * particle.progress,
-          na.z + (nb.z - na.z) * particle.progress,
-        );
-      });
-      particlePos.needsUpdate = true;
-    }
+    writeGroup(fillIndices, fillGeometryRef.current);
+    writeGroup(anatomicalIndices, anatomicalGeometryRef.current);
   }
 
-  function writeNodePosition(nodeIndex: number, listIndex: number, isAnatomical: boolean) {
-    const geometry = isAnatomical ? anatomicalGeometryRef.current : fillGeometryRef.current;
-    const position = geometry?.attributes.position as THREE.BufferAttribute | undefined;
-    if (!position) return;
-    const node = nodes[nodeIndex];
-    position.setXYZ(listIndex, node.x, node.y, node.z);
-  }
-
-  useFrame((state, delta) => {
+  useFrame((state) => {
     const group = groupRef.current;
     if (!group) return;
 
-    if (modeRef.current === 'idle') {
-      if (!reducedMotion) {
-        const elapsed = state.clock.elapsedTime;
+    const elapsed = state.clock.elapsedTime;
+    const mode = modeRef.current;
 
-        for (const particle of particles) {
-          particle.progress = (particle.progress + particle.speed * delta) % 1;
-        }
-
-        nodes.forEach((node, i) => {
-          node.x = node.baseX + Math.sin(elapsed * 0.4 + i) * IDLE_JITTER;
-          node.y = node.baseY + Math.cos(elapsed * 0.35 + i * 1.3) * IDLE_JITTER;
-          node.z = node.baseZ + Math.sin(elapsed * 0.3 + i * 0.7) * IDLE_JITTER;
-        });
-
-        fillIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, false));
-        anatomicalIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, true));
-        if (fillGeometryRef.current) fillGeometryRef.current.attributes.position.needsUpdate = true;
-        if (anatomicalGeometryRef.current) anatomicalGeometryRef.current.attributes.position.needsUpdate = true;
-
-        writeConnectionsAndParticles();
-      }
+    if (mode === 'idle') {
+      // Posições ficam paradas em repouso: o que dá vida agora é o brilho (cintilância), não o
+      // deslocamento — num retrato, oscilar posição lê como tremor.
+      if (!reducedMotion) writeAttributes(elapsed, false);
 
       if (fine && !reducedMotion) {
         let targetY = 0;
@@ -403,13 +423,11 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
         group.rotation.y = THREE.MathUtils.degToRad(rotation.current.y);
         group.rotation.x = THREE.MathUtils.degToRad(rotation.current.x);
       }
-    } else if (modeRef.current === 'dissolved' && !reducedMotion) {
+    } else if (mode === 'dissolved' && !reducedMotion) {
       // Estilhaços continuam à deriva bem devagar no fundo, atrás do texto, em vez de
       // congelarem no ponto exato onde a explosão parou.
       const targets = explodedTargetsRef.current;
       if (targets) {
-        const elapsed = state.clock.elapsedTime;
-
         nodes.forEach((node, i) => {
           const target = targets[i];
           node.x = target.x + Math.sin(elapsed * DRIFT_FREQ_X + i) * DRIFT_AMPLITUDE;
@@ -417,13 +435,11 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
           node.z = target.z + Math.sin(elapsed * DRIFT_FREQ_Z + i * 0.7) * DRIFT_AMPLITUDE;
         });
 
-        fillIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, false));
-        anatomicalIndices.forEach((nodeIndex, i) => writeNodePosition(nodeIndex, i, true));
-        if (fillGeometryRef.current) fillGeometryRef.current.attributes.position.needsUpdate = true;
-        if (anatomicalGeometryRef.current) anatomicalGeometryRef.current.attributes.position.needsUpdate = true;
-
-        writeConnectionsAndParticles();
+        writeAttributes(elapsed, true);
       }
+    } else if (mode === 'transitioning') {
+      // O GSAP já mutou node.x/y/z e stateFactorRef neste frame; aqui só transcrevemos pra GPU.
+      writeAttributes(elapsed, true);
     }
   });
 
@@ -439,36 +455,8 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
         node.z = lerp(node.baseZ, targets[i].z, eased);
       });
 
-      fillIndices.forEach((nodeIndex, i) => {
-        writeNodePosition(nodeIndex, i, false);
-        const localT = Math.max(0, Math.min(1, (globalTime - delays[nodeIndex]) / EXPLODE_NODE_DURATION));
-        const alpha = lerp(nodeAlpha[nodeIndex], nodeAlpha[nodeIndex] * DISSOLVED_ALPHA_FACTOR, easeExplode(localT));
-        const color = fillGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
-        color?.setW(i, alpha);
-      });
-      anatomicalIndices.forEach((nodeIndex, i) => {
-        writeNodePosition(nodeIndex, i, true);
-        const localT = Math.max(0, Math.min(1, (globalTime - delays[nodeIndex]) / EXPLODE_NODE_DURATION));
-        const alpha = lerp(nodeAlpha[nodeIndex], nodeAlpha[nodeIndex] * DISSOLVED_ALPHA_FACTOR, easeExplode(localT));
-        const color = anatomicalGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
-        color?.setW(i, alpha);
-      });
-
-      if (fillGeometryRef.current) {
-        fillGeometryRef.current.attributes.position.needsUpdate = true;
-        fillGeometryRef.current.attributes.color.needsUpdate = true;
-      }
-      if (anatomicalGeometryRef.current) {
-        anatomicalGeometryRef.current.attributes.position.needsUpdate = true;
-        anatomicalGeometryRef.current.attributes.color.needsUpdate = true;
-      }
-
-      writeConnectionsAndParticles();
-
-      const groupT = Math.max(0, Math.min(1, globalTime / EXPLODE_LINES_DURATION));
-      const fade = lerp(1, DISSOLVED_ALPHA_FACTOR, easeLines(groupT));
-      if (linesMaterialRef.current) linesMaterialRef.current.opacity = LINES_BASE_OPACITY * fade;
-      if (particlesMaterialRef.current) particlesMaterialRef.current.opacity = PARTICLES_BASE_OPACITY * fade;
+      // Só o fator de estado: a escrita no atributo é do writeAttributes, chamado pelo useFrame.
+      stateFactorRef.current = lerp(1, DISSOLVED_ALPHA_FACTOR, easeExplode(t));
     }
 
     function applyReformFrame(t: number, delays: number[], starts: THREE.Vector3[]) {
@@ -482,57 +470,17 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
         node.z = lerp(starts[i].z, node.baseZ, eased);
       });
 
-      fillIndices.forEach((nodeIndex, i) => {
-        writeNodePosition(nodeIndex, i, false);
-        const localT = Math.max(0, Math.min(1, (globalTime - delays[nodeIndex]) / REFORM_NODE_DURATION));
-        const alpha = lerp(nodeAlpha[nodeIndex] * DISSOLVED_ALPHA_FACTOR, nodeAlpha[nodeIndex], easeReform(localT));
-        const color = fillGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
-        color?.setW(i, alpha);
-      });
-      anatomicalIndices.forEach((nodeIndex, i) => {
-        writeNodePosition(nodeIndex, i, true);
-        const localT = Math.max(0, Math.min(1, (globalTime - delays[nodeIndex]) / REFORM_NODE_DURATION));
-        const alpha = lerp(nodeAlpha[nodeIndex] * DISSOLVED_ALPHA_FACTOR, nodeAlpha[nodeIndex], easeReform(localT));
-        const color = anatomicalGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
-        color?.setW(i, alpha);
-      });
-
-      if (fillGeometryRef.current) {
-        fillGeometryRef.current.attributes.position.needsUpdate = true;
-        fillGeometryRef.current.attributes.color.needsUpdate = true;
-      }
-      if (anatomicalGeometryRef.current) {
-        anatomicalGeometryRef.current.attributes.position.needsUpdate = true;
-        anatomicalGeometryRef.current.attributes.color.needsUpdate = true;
-      }
-
-      writeConnectionsAndParticles();
-
-      const groupT = Math.max(0, Math.min(1, (globalTime - REFORM_LINES_DELAY) / REFORM_LINES_DURATION));
-      const fade = lerp(DISSOLVED_ALPHA_FACTOR, 1, easeLines(groupT));
-      if (linesMaterialRef.current) linesMaterialRef.current.opacity = LINES_BASE_OPACITY * fade;
-      if (particlesMaterialRef.current) particlesMaterialRef.current.opacity = PARTICLES_BASE_OPACITY * fade;
+      stateFactorRef.current = lerp(DISSOLVED_ALPHA_FACTOR, 1, easeReform(t));
     }
 
-    // Sem animação (usado só em prefers-reduced-motion): aplica a opacidade de repouso (dimmed
-    // ou cheia) na hora, sem tween — senão os fragmentos ficam presos na opacidade cheia atrás
-    // do texto, já que o caminho normal que os apaga um pouco é o próprio tween do GSAP.
-    function setDimmed(dimmed: boolean) {
-      const factor = dimmed ? DISSOLVED_ALPHA_FACTOR : 1;
-
-      fillIndices.forEach((nodeIndex, i) => {
-        const color = fillGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
-        color?.setW(i, nodeAlpha[nodeIndex] * factor);
-      });
-      anatomicalIndices.forEach((nodeIndex, i) => {
-        const color = anatomicalGeometryRef.current?.attributes.color as THREE.BufferAttribute | undefined;
-        color?.setW(i, nodeAlpha[nodeIndex] * factor);
-      });
-      if (fillGeometryRef.current) fillGeometryRef.current.attributes.color.needsUpdate = true;
-      if (anatomicalGeometryRef.current) anatomicalGeometryRef.current.attributes.color.needsUpdate = true;
-
-      if (linesMaterialRef.current) linesMaterialRef.current.opacity = LINES_BASE_OPACITY * factor;
-      if (particlesMaterialRef.current) particlesMaterialRef.current.opacity = PARTICLES_BASE_OPACITY * factor;
+    // Sem animação (usado só em prefers-reduced-motion): aplica o estado final na hora, sem tween
+    // — senão os fragmentos ficam presos na opacidade cheia atrás do texto, já que o caminho
+    // normal que os apaga é o próprio tween do GSAP. O invalidate() é obrigatório aqui: nesse
+    // caminho o frameloop é 'demand', então sem ele a mudança nunca vira pixel.
+    function applyInstantState(dimmed: boolean) {
+      stateFactorRef.current = dimmed ? DISSOLVED_ALPHA_FACTOR : 1;
+      writeAttributes(0, true);
+      invalidate();
     }
 
     function explode() {
@@ -541,7 +489,7 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
       onDissolvedChange(true);
 
       if (reducedMotion) {
-        setDimmed(true);
+        applyInstantState(true);
         modeRef.current = 'dissolved';
         return;
       }
@@ -568,6 +516,7 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
         onUpdate: () => applyExplodeFrame(driver.t, delays, targets),
         onComplete: () => {
           explodedTargetsRef.current = targets;
+          stateFactorRef.current = DISSOLVED_ALPHA_FACTOR;
           modeRef.current = 'dissolved';
         },
       });
@@ -579,7 +528,7 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
       onDissolvedChange(false);
 
       if (reducedMotion) {
-        setDimmed(false);
+        applyInstantState(false);
         modeRef.current = 'idle';
         return;
       }
@@ -599,6 +548,11 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
             node.y = node.baseY;
             node.z = node.baseZ;
           });
+          stateFactorRef.current = 1;
+          // O modo 'idle' não reescreve posição (os pontos ficam parados de propósito), então a
+          // posição-base final precisa ser transcrita aqui — senão os pontos congelariam no
+          // último frame do tween, a um fio de distância do lugar certo.
+          writeAttributes(0, true);
           modeRef.current = 'idle';
         },
       });
@@ -615,7 +569,17 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
           <bufferAttribute attach="attributes-position" args={[buffers.fillPositions, 3]} />
           <bufferAttribute attach="attributes-color" args={[buffers.fillColors, 4]} />
         </bufferGeometry>
-        <pointsMaterial vertexColors transparent sizeAttenuation depthWrite={false} size={FILL_NODE_SIZE} />
+        {/* `map` com o sprite radial é o que tira o quadrado duro do ponto. `alphaTest` fica no
+            padrão (0) de propósito: qualquer valor acima recortaria o halo suave num disco de
+            borda dura, que é justamente o que se quer evitar. */}
+        <pointsMaterial
+          map={getPointSprite()}
+          vertexColors
+          transparent
+          sizeAttenuation
+          depthWrite={false}
+          size={FILL_NODE_SIZE}
+        />
       </points>
 
       <points>
@@ -623,28 +587,13 @@ function HeadScene({ data, modeRef, controlsRef, wrapperRef, reducedMotion, fine
           <bufferAttribute attach="attributes-position" args={[buffers.anatomicalPositions, 3]} />
           <bufferAttribute attach="attributes-color" args={[buffers.anatomicalColors, 4]} />
         </bufferGeometry>
-        <pointsMaterial vertexColors transparent sizeAttenuation depthWrite={false} size={ANATOMICAL_NODE_SIZE} />
-      </points>
-
-      <lineSegments>
-        <bufferGeometry ref={linesGeometryRef}>
-          <bufferAttribute attach="attributes-position" args={[buffers.linePositions, 3]} />
-        </bufferGeometry>
-        <lineBasicMaterial ref={linesMaterialRef} color={ACCENT_HEX} transparent opacity={LINES_BASE_OPACITY} depthWrite={false} />
-      </lineSegments>
-
-      <points>
-        <bufferGeometry ref={particlesGeometryRef}>
-          <bufferAttribute attach="attributes-position" args={[buffers.particlePositions, 3]} />
-        </bufferGeometry>
         <pointsMaterial
-          ref={particlesMaterialRef}
-          color={WHITE_HEX}
+          map={getPointSprite()}
+          vertexColors
           transparent
-          opacity={PARTICLES_BASE_OPACITY}
           sizeAttenuation
           depthWrite={false}
-          size={PARTICLE_SIZE}
+          size={ANATOMICAL_NODE_SIZE}
         />
       </points>
     </group>
@@ -807,8 +756,14 @@ interface FaceGraphicProps {
 /**
  * Rosto humano em 3D (Three.js/R3F), constelação sobre uma malha fixa (938 nós, 3.259 arestas)
  * extraída da referência visual, com profundidade Z exagerada pra ler como volume de verdade.
- * Os 491 nós anatômicos (olhos, nariz, lábios, sobrancelhas, mandíbula, orelhas, silhueta)
- * brilham mais que o preenchimento da malha. Acompanha o mouse virando em 3D. Um clique — ou
+ *
+ * É uma nuvem de pontos pura: as 3.259 arestas da malha não são desenhadas. Elas formavam uma
+ * teia triangulada (a malha não traz contorno de olho/boca/silhueta endereçável, só triangulação)
+ * que encobria o rosto em vez de descrevê-lo. Sem arestas, a leitura fica por conta da hierarquia
+ * de tamanho e brilho: os 491 nós anatômicos são bem maiores e mais fortes que o preenchimento,
+ * que vira poeira escura dando volume. Todos os pontos são brancos, menos um punhado sorteado que
+ * cintila em lime. Acompanha o mouse virando em 3D — com amplitude curta, porque a malha é uma
+ * casca frontal e girar muito denuncia a máscara plana. Um clique — ou
  * Enter/Espaço no controle focável — dispara a explosão: os nós se espalham pela seção inteira
  * como uma constelação de estrelas à deriva lenta (não somem, só recuam de opacidade) e o texto
  * "sobre mim" aparece na própria seção — não como modal, sem scroll da página enquanto visível.
@@ -823,9 +778,11 @@ export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) 
     onDissolvedChange?.(dissolved);
   }, [dissolved, onDissolvedChange]);
 
+  const [coarse] = useState(() => isCoarsePointer());
+
   const dataRef = useRef<FaceData | null>(null);
   if (dataRef.current === null) {
-    dataRef.current = buildFace(isCoarsePointer());
+    dataRef.current = buildFace(coarse);
   }
 
   const modeRef = useRef<Mode>('idle');
@@ -885,7 +842,9 @@ export function FaceGraphic({ className, onDissolvedChange }: FaceGraphicProps) 
         <div aria-hidden="true" className="h-full w-full">
           <Canvas
             camera={{ position: [0, 0, 6], fov: 45 }}
-            dpr={[1, 2]}
+            // Sprite com halo é fill-rate bound: no mobile o DPR trava em 1, e mesmo no desktop
+            // não vale pagar 2x (o ganho visual num ponto borrado de propósito é quase nulo).
+            dpr={coarse ? 1 : [1, 1.5]}
             gl={{ antialias: true, alpha: true }}
             frameloop={frameloop}
           >
